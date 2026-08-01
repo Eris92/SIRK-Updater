@@ -135,11 +135,26 @@ try {
     New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
     Copy-Item (Join-Path $servicePublish '*') $InstallRoot -Recurse -Force
 
-    $cliExe = Join-Path $cliPublish 'SirkUpdater.exe'
-    if (-not (Test-Path $cliExe)) {
-        throw "Published CLI executable is missing: $cliExe"
+    $cliCandidates = @(
+        (Join-Path $cliPublish 'SirkUpdater.exe'),
+        (Join-Path $cliPublish 'SirkUpdater.Cli.exe')
+    ) | Where-Object { Test-Path $_ }
+
+    if ($cliCandidates.Count -eq 0) {
+        $cliCandidates = @(
+            Get-ChildItem -LiteralPath $cliPublish -Filter '*.exe' -File |
+                Where-Object Name -ne 'SirkUpdater.Service.exe' |
+                Select-Object -ExpandProperty FullName
+        )
     }
-    Copy-Item $cliExe (Join-Path $InstallRoot 'SirkUpdater.exe') -Force
+
+    if ($cliCandidates.Count -ne 1) {
+        $found = Get-ChildItem -LiteralPath $cliPublish -File |
+            Select-Object -ExpandProperty Name
+        throw "Unable to identify exactly one published CLI executable. Found: $($found -join ', ')"
+    }
+
+    Copy-Item $cliCandidates[0] (Join-Path $InstallRoot 'SirkUpdater.exe') -Force
 
     $serviceExe = Join-Path $InstallRoot 'SirkUpdater.Service.exe'
     if (-not (Test-Path $serviceExe)) { throw 'Published service executable is missing.' }
