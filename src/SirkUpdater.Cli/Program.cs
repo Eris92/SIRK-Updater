@@ -3,7 +3,7 @@ using SirkUpdater.Core;
 
 return await RunAsync(args);
 
-static Task<int> RunAsync(string[] args)
+static async Task<int> RunAsync(string[] args)
 {
     try
     {
@@ -14,28 +14,51 @@ static Task<int> RunAsync(string[] args)
                 ?? throw new InvalidDataException("Manifest is empty.");
             registry.Register(manifest);
             Console.WriteLine($"REGISTERED {manifest.ApplicationId}");
-            return Task.FromResult(0);
+            return 0;
         }
 
         if (args.Length == 1 && args[0].Equals("list", StringComparison.OrdinalIgnoreCase))
         {
             foreach (var manifest in registry.List())
                 Console.WriteLine($"{manifest.ApplicationId}\t{manifest.DisplayName}\t{manifest.Channel}");
-            return Task.FromResult(0);
+            return 0;
         }
 
         if (args.Length == 2 && args[0].Equals("show", StringComparison.OrdinalIgnoreCase))
         {
             Console.WriteLine(JsonSerializer.Serialize(registry.Get(args[1]), new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
-            return Task.FromResult(0);
+            return 0;
         }
 
-        Console.Error.WriteLine("Usage: SirkUpdater register <manifest.json> | list | show <applicationId>");
-        return Task.FromResult(2);
+        if (args.Length is 4 or 5 && args[0].Equals("update", StringComparison.OrdinalIgnoreCase))
+        {
+            var engine = new TransactionalUpdateEngine(registry);
+            var state = await engine.ExecuteAsync(new UpdateRequest
+            {
+                ApplicationId = args[1],
+                PackagePath = Path.GetFullPath(args[2]),
+                ExpectedSha256 = args[3],
+                TargetVersion = args.Length == 5 ? args[4] : null
+            });
+            Console.WriteLine(JsonSerializer.Serialize(state, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+            return 0;
+        }
+
+        Console.Error.WriteLine("Usage:");
+        Console.Error.WriteLine("  SirkUpdater register <manifest.json>");
+        Console.Error.WriteLine("  SirkUpdater list");
+        Console.Error.WriteLine("  SirkUpdater show <applicationId>");
+        Console.Error.WriteLine("  SirkUpdater update <applicationId> <package.zip> <sha256> [targetVersion]");
+        return 2;
+    }
+    catch (UpdateFailedException error)
+    {
+        Console.Error.WriteLine(JsonSerializer.Serialize(error.State, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
+        return 3;
     }
     catch (Exception error)
     {
         Console.Error.WriteLine(error.Message);
-        return Task.FromResult(1);
+        return 1;
     }
 }
