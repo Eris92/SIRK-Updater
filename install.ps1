@@ -134,16 +134,26 @@ try {
 
     New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
     Copy-Item (Join-Path $servicePublish '*') $InstallRoot -Recurse -Force
-    Copy-Item (Join-Path $cliPublish 'SirkUpdater.Cli.exe') (Join-Path $InstallRoot 'SirkUpdater.exe') -Force
+
+    $cliExe = Join-Path $cliPublish 'SirkUpdater.exe'
+    if (-not (Test-Path $cliExe)) {
+        throw "Published CLI executable is missing: $cliExe"
+    }
+    Copy-Item $cliExe (Join-Path $InstallRoot 'SirkUpdater.exe') -Force
 
     $serviceExe = Join-Path $InstallRoot 'SirkUpdater.Service.exe'
     if (-not (Test-Path $serviceExe)) { throw 'Published service executable is missing.' }
 
     Write-Host '=== Register Windows service ==='
-    & sc.exe create $ServiceName "binPath= `"$serviceExe`"" 'start= auto' 'DisplayName= SIRK Updater' | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw 'Unable to create SIRK Updater service.' }
-    & sc.exe description $ServiceName 'Transactional update service for SIRK Portal and SIRK Agent.' | Out-Null
+    New-Service `
+        -Name $ServiceName `
+        -BinaryPathName ('"{0}"' -f $serviceExe) `
+        -DisplayName 'SIRK Updater' `
+        -Description 'Transactional update service for SIRK Portal and SIRK Agent.' `
+        -StartupType Automatic | Out-Null
+
     & sc.exe failure $ServiceName 'reset= 86400' 'actions= restart/5000/restart/15000/restart/60000' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to configure SIRK Updater recovery actions.' }
 
     Start-Service $ServiceName
     (Get-Service $ServiceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
