@@ -136,9 +136,11 @@ try {
     Copy-Item (Join-Path $servicePublish '*') $InstallRoot -Recurse -Force
 
     $cliCandidates = @(
-        (Join-Path $cliPublish 'SirkUpdater.exe'),
-        (Join-Path $cliPublish 'SirkUpdater.Cli.exe')
-    ) | Where-Object { Test-Path $_ }
+        @(
+            (Join-Path $cliPublish 'SirkUpdater.exe'),
+            (Join-Path $cliPublish 'SirkUpdater.Cli.exe')
+        ) | Where-Object { Test-Path $_ }
+    )
 
     if ($cliCandidates.Count -eq 0) {
         $cliCandidates = @(
@@ -149,8 +151,10 @@ try {
     }
 
     if ($cliCandidates.Count -ne 1) {
-        $found = Get-ChildItem -LiteralPath $cliPublish -File |
-            Select-Object -ExpandProperty Name
+        $found = @(
+            Get-ChildItem -LiteralPath $cliPublish -File |
+                Select-Object -ExpandProperty Name
+        )
         throw "Unable to identify exactly one published CLI executable. Found: $($found -join ', ')"
     }
 
