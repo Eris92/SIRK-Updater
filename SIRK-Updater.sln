@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SirkUpdater.Core", "src\SirkUpdater.Core\SirkUpdater.Core.csproj", "{B7342E69-E1B6-4D6C-A2B2-0CFE38E478E1}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SirkUpdater.Cli", "src\SirkUpdater.Cli\SirkUpdater.Cli.csproj", "{AEFA7EAC-47CF-49C4-9030-2847B13CE4B7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SirkUpdater.Service", "src\SirkUpdater.Service\SirkUpdater.Service.csproj", "{70920747-CF24-4ADB-81B5-A91A7342DA11}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B7342E69-E1B6-4D6C-A2B2-0CFE38E478E1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B7342E69-E1B6-4D6C-A2B2-0CFE38E478E1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B7342E69-E1B6-4D6C-A2B2-0CFE38E478E1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B7342E69-E1B6-4D6C-A2B2-0CFE38E478E1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AEFA7EAC-47CF-49C4-9030-2847B13CE4B7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AEFA7EAC-47CF-49C4-9030-2847B13CE4B7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AEFA7EAC-47CF-49C4-9030-2847B13CE4B7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AEFA7EAC-47CF-49C4-9030-2847B13CE4B7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{70920747-CF24-4ADB-81B5-A91A7342DA11}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{70920747-CF24-4ADB-81B5-A91A7342DA11}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{70920747-CF24-4ADB-81B5-A91A7342DA11}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{70920747-CF24-4ADB-81B5-A91A7342DA11}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

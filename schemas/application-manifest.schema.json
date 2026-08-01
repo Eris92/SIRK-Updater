@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sir-k.pl/schemas/sirk-updater/application-manifest-v1.json",
+  "title": "SIRK Updater application manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "applicationId",
+    "displayName",
+    "serviceName",
+    "installRoot",
+    "dataRoot",
+    "channel",
+    "updateSource"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "applicationId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,63}$" },
+    "displayName": { "type": "string", "minLength": 1 },
+    "serviceName": { "type": "string", "minLength": 1 },
+    "watchdogServiceName": { "type": ["string", "null"] },
+    "installRoot": { "type": "string", "minLength": 3 },
+    "dataRoot": { "type": "string", "minLength": 3 },
+    "healthUrl": { "type": ["string", "null"], "format": "uri" },
+    "channel": { "enum": ["stable", "beta", "dev"] },
+    "updateSource": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "packageSha256Url": { "type": ["string", "null"], "format": "uri" },
+    "signatureRequired": { "type": "boolean" }
+  }
+}

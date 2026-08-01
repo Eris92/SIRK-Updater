@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet restore SIRK-Updater.sln
+      - run: dotnet build SIRK-Updater.sln --configuration Release --no-restore
+
+  publish-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet publish src/SirkUpdater.Service/SirkUpdater.Service.csproj -c Release -r win-x64 --self-contained false -o artifacts/service
+      - run: dotnet publish src/SirkUpdater.Cli/SirkUpdater.Cli.csproj -c Release -r win-x64 --self-contained false -o artifacts/cli
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sirk-updater-win-x64
+          path: artifacts
