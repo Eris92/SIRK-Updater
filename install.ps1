@@ -41,7 +41,8 @@ try {
     New-Item -ItemType Directory -Path $WorkRoot -Force | Out-Null
     New-Item -ItemType Directory -Path $DataRoot -Force | Out-Null
 
-    $dotnet = (Get-Command dotnet.exe -ErrorAction SilentlyContinue).Source
+    $dotnetCommand = Get-Command dotnet.exe -ErrorAction SilentlyContinue
+    $dotnet = if ($dotnetCommand) { $dotnetCommand.Source } else { $null }
     if (-not $dotnet) {
         Write-Host '=== Install temporary .NET 8 SDK ==='
         $dotnetInstall = Join-Path $WorkRoot 'dotnet-install.ps1'
