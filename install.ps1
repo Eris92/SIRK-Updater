@@ -15,6 +15,7 @@ $WorkRoot = Join-Path $env:TEMP ('SIRK-Updater-Install-' + [Guid]::NewGuid().ToS
 $SourceZip = Join-Path $WorkRoot 'source.zip'
 $SourceRoot = Join-Path $WorkRoot 'source'
 $DotnetRoot = Join-Path $WorkRoot 'dotnet'
+$NugetConfig = Join-Path $WorkRoot 'NuGet.Config'
 $ServiceName = 'SirkUpdater'
 
 function Invoke-CheckedProcess {
@@ -52,17 +53,73 @@ try {
         $dotnet = Join-Path $DotnetRoot 'dotnet.exe'
     }
 
+    @'
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+  </packageSources>
+  <disabledPackageSources>
+    <clear />
+  </disabledPackageSources>
+  <packageSourceMapping>
+    <clear />
+  </packageSourceMapping>
+</configuration>
+'@ | Set-Content -LiteralPath $NugetConfig -Encoding UTF8
+
     Write-Host '=== Download source ==='
     Invoke-WebRequest -UseBasicParsing -Uri "https://codeload.github.com/Eris92/SIRK-Updater/zip/refs/heads/$Channel" -OutFile $SourceZip
     Expand-Archive -LiteralPath $SourceZip -DestinationPath $SourceRoot -Force
     $repository = Get-ChildItem $SourceRoot -Directory | Select-Object -First 1
     if (-not $repository) { throw 'Downloaded repository is empty.' }
 
+    Write-Host '=== Restore from isolated NuGet source ==='
+    $serviceProject = 'src\SirkUpdater.Service\SirkUpdater.Service.csproj'
+    $cliProject = 'src\SirkUpdater.Cli\SirkUpdater.Cli.csproj'
+
+    Invoke-CheckedProcess $dotnet @(
+        'restore', $serviceProject,
+        '--runtime', 'win-x64',
+        '--configfile', $NugetConfig,
+        '-p:PublishSingleFile=true'
+    ) $repository.FullName
+
+    Invoke-CheckedProcess $dotnet @(
+        'restore', $cliProject,
+        '--runtime', 'win-x64',
+        '--configfile', $NugetConfig,
+        '-p:PublishSingleFile=true'
+    ) $repository.FullName
+
     Write-Host '=== Build self-contained binaries ==='
     $servicePublish = Join-Path $WorkRoot 'publish-service'
     $cliPublish = Join-Path $WorkRoot 'publish-cli'
-    Invoke-CheckedProcess $dotnet @('publish', 'src\SirkUpdater.Service\SirkUpdater.Service.csproj', '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '-p:PublishSingleFile=true', '-p:DebugType=None', '-p:DebugSymbols=false', '-o', $servicePublish) $repository.FullName
-    Invoke-CheckedProcess $dotnet @('publish', 'src\SirkUpdater.Cli\SirkUpdater.Cli.csproj', '-c', 'Release', '-r', 'win-x64', '--self-contained', 'true', '-p:PublishSingleFile=true', '-p:DebugType=None', '-p:DebugSymbols=false', '-o', $cliPublish) $repository.FullName
+
+    Invoke-CheckedProcess $dotnet @(
+        'publish', $serviceProject,
+        '-c', 'Release',
+        '-r', 'win-x64',
+        '--self-contained', 'true',
+        '--no-restore',
+        '-p:PublishSingleFile=true',
+        '-p:DebugType=None',
+        '-p:DebugSymbols=false',
+        '-o', $servicePublish
+    ) $repository.FullName
+
+    Invoke-CheckedProcess $dotnet @(
+        'publish', $cliProject,
+        '-c', 'Release',
+        '-r', 'win-x64',
+        '--self-contained', 'true',
+        '--no-restore',
+        '-p:PublishSingleFile=true',
+        '-p:DebugType=None',
+        '-p:DebugSymbols=false',
+        '-o', $cliPublish
+    ) $repository.FullName
 
     Write-Host '=== Stop previous service ==='
     Stop-Service $ServiceName -Force -ErrorAction SilentlyContinue
