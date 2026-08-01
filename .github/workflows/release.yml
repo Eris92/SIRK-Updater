@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, for example 0.1.0-dev.1
+        required: true
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $version = '${{ inputs.version }}'
+          if (-not $version) {
+            $version = '${{ github.ref_name }}'.TrimStart('v')
+          }
+          if ($version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') {
+            throw "Invalid version: $version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      - name: Restore
+        run: dotnet restore SIRK-Updater.sln
+
+      - name: Build and test
+        run: dotnet build SIRK-Updater.sln -c Release --no-restore
+
+      - name: Publish self-contained binaries
+        shell: pwsh
+        run: |
+          $out = Join-Path $PWD 'artifacts\payload'
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+
+          dotnet publish src/SirkUpdater.Service/SirkUpdater.Service.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false `
+            -o (Join-Path $out 'service')
+
+          dotnet publish src/SirkUpdater.Cli/SirkUpdater.Cli.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false `
+            -o (Join-Path $out 'cli')
+
+      - name: Build release package and checksums
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $root = Join-Path $PWD 'artifacts'
+          $payload = Join-Path $root 'payload'
+          $packageRoot = Join-Path $root 'package'
+          New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
+
+          Copy-Item (Join-Path $payload 'service\*') $packageRoot -Recurse -Force
+
+          $cli = @(
+            Join-Path $payload 'cli\SirkUpdater.exe'
+            Join-Path $payload 'cli\SirkUpdater.Cli.exe'
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $cli) {
+            $cli = Get-ChildItem (Join-Path $payload 'cli') -Filter '*.exe' -File | Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $cli) { throw 'CLI executable not found.' }
+          Copy-Item $cli (Join-Path $packageRoot 'SirkUpdater.exe') -Force
+
+          @{
+            schemaVersion = 1
+            product = 'sirk-updater'
+            version = $version
+            runtime = 'win-x64'
+            selfContained = $true
+            createdAtUtc = [DateTime]::UtcNow.ToString('o')
+          } | ConvertTo-Json | Set-Content (Join-Path $packageRoot 'release-manifest.json') -Encoding UTF8
+
+          $zip = Join-Path $root "SIRK-Updater-$version-win-x64.zip"
+          Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath $zip -Force
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path $zip -Leaf)" | Set-Content "$zip.sha256" -Encoding ascii
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sirk-updater-${{ steps.version.outputs.version }}-win-x64
+          path: |
+            artifacts/SIRK-Updater-*-win-x64.zip
+            artifacts/SIRK-Updater-*-win-x64.zip.sha256
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/SIRK-Updater-*-win-x64.zip
+            artifacts/SIRK-Updater-*-win-x64.zip.sha256
+          generate_release_notes: true
