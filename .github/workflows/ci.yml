@@ -28,17 +28,17 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Parse installers and tests
+      - name: Parse canonical installer and tests
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           foreach ($file in @(
-            'install.ps1',
-            'install-release.ps1',
+            'install-release-v2.ps1',
             'tests/install-release-contract.ps1',
             'tests/delegated-signature-contract.ps1',
             'test/release-package-contract.ps1'
           )) {
+            if (-not (Test-Path -LiteralPath $file)) { throw "Missing contract file: $file" }
             $tokens = $null
             $errors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile(
@@ -50,6 +50,8 @@ jobs:
               throw ($errors | ForEach-Object Message | Out-String)
             }
           }
+          if (Test-Path install.ps1) { throw 'Legacy source installer is forbidden.' }
+          if (Test-Path install-release.ps1) { throw 'Legacy release installer is forbidden.' }
       - name: Release installer contract
         shell: pwsh
         run: ./tests/install-release-contract.ps1
