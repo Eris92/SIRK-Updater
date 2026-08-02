@@ -40,6 +40,12 @@ public sealed record ApplicationManifest
     [JsonPropertyName("signatureRequired")]
     public bool SignatureRequired { get; init; } = true;
 
+    [JsonPropertyName("signatureVerifierPath")]
+    public string? SignatureVerifierPath { get; init; }
+
+    [JsonPropertyName("signatureVerifierArguments")]
+    public IReadOnlyList<string> SignatureVerifierArguments { get; init; } = [];
+
     public void Validate()
     {
         if (!System.Text.RegularExpressions.Regex.IsMatch(ApplicationId, "^[a-z0-9][a-z0-9._-]{1,63}$"))
@@ -52,5 +58,22 @@ public sealed record ApplicationManifest
             throw new InvalidDataException("updateSource must be an absolute HTTPS URL.");
         if (HealthUrl is not null && (!Uri.TryCreate(HealthUrl, UriKind.Absolute, out var health) || health.Scheme is not ("http" or "https")))
             throw new InvalidDataException("healthUrl must be HTTP or HTTPS.");
+
+        if (!SignatureRequired) return;
+        if (string.IsNullOrWhiteSpace(SignatureVerifierPath) || !Path.IsPathFullyQualified(SignatureVerifierPath))
+            throw new InvalidDataException("signatureVerifierPath must be an absolute path when signatureRequired is true.");
+
+        var installRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(InstallRoot));
+        var verifier = Path.GetFullPath(SignatureVerifierPath);
+        var relative = Path.GetRelativePath(installRoot, verifier);
+        if (relative.Equals("..", StringComparison.Ordinal) ||
+            relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
+            Path.IsPathFullyQualified(relative))
+            throw new InvalidDataException("signatureVerifierPath must be located below installRoot.");
+        if (SignatureVerifierArguments.Count == 0 ||
+            !SignatureVerifierArguments.Any(value => value.Contains("{payload}", StringComparison.Ordinal)))
+            throw new InvalidDataException("signatureVerifierArguments must include the {payload} placeholder.");
+        if (SignatureVerifierArguments.Any(value => value.Contains('\0') || value.Length > 4096))
+            throw new InvalidDataException("signatureVerifierArguments contains an invalid argument.");
     }
 }
