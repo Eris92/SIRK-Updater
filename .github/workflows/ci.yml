@@ -40,6 +40,9 @@ jobs:
       - name: Release installer contract
         shell: powershell
         run: .\tests\install-release-contract.ps1
+      - name: Delegated signature verification contract
+        shell: powershell
+        run: .\tests\delegated-signature-contract.ps1
 
   publish-windows:
     runs-on: windows-latest
