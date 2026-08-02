@@ -158,7 +158,8 @@ try {
         throw "Unable to identify exactly one published CLI executable. Found: $($found -join ', ')"
     }
 
-    Copy-Item $cliCandidates[0] (Join-Path $InstallRoot 'SirkUpdater.exe') -Force
+    $cliPath = Join-Path $InstallRoot 'SirkUpdater.exe'
+    Copy-Item $cliCandidates[0] $cliPath -Force
 
     $serviceExe = Join-Path $InstallRoot 'SirkUpdater.Service.exe'
     if (-not (Test-Path $serviceExe)) { throw 'Published service executable is missing.' }
@@ -175,12 +176,39 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Unable to configure SIRK Updater recovery actions.' }
 
     Start-Service $ServiceName
-    (Get-Service $ServiceName).WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
+    $service = Get-Service $ServiceName -ErrorAction Stop
+    $service.WaitForStatus('Running', [TimeSpan]::FromSeconds(30))
+    $service.Refresh()
+
+    if ($service.Status -ne 'Running') {
+        throw "SIRK Updater service is not running. Status=$($service.Status)"
+    }
+    if (-not (Test-Path -LiteralPath $cliPath -PathType Leaf)) {
+        throw "SIRK Updater CLI is missing: $cliPath"
+    }
+
+    $startMode = 'Automatic'
+    try {
+        $serviceInfo = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'" -ErrorAction Stop
+        if ($serviceInfo -and $serviceInfo.StartMode) { $startMode = [string]$serviceInfo.StartMode }
+    }
+    catch {
+        Write-Warning "CIM service report unavailable: $($_.Exception.Message)"
+        $qc = & sc.exe qc $ServiceName 2>&1
+        if ($LASTEXITCODE -eq 0 -and ($qc -match 'AUTO_START')) { $startMode = 'Automatic' }
+    }
+
+    if ($startMode -notmatch 'Auto') {
+        throw "SIRK Updater service startup mode is not Automatic. StartMode=$startMode"
+    }
 
     Write-Host ''
-    Write-Host 'SIRK_UPDATER_INSTALL_OK'
-    Write-Host "CLI: $(Join-Path $InstallRoot 'SirkUpdater.exe')"
-    Get-CimInstance Win32_Service -Filter "Name='$ServiceName'" | Select-Object Name, DisplayName, State, StartMode, PathName | Format-List
+    Write-Host 'SIRK_UPDATER_INSTALL_OK' -ForegroundColor Green
+    Write-Host "CLI: $cliPath"
+    Write-Host "Service: $ServiceName"
+    Write-Host "State: $($service.Status)"
+    Write-Host "StartMode: $startMode"
+    exit 0
 }
 finally {
     Remove-Item $WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
