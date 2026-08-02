@@ -24,6 +24,13 @@ function Write-SirkLog {
     param([Parameter(Mandatory)][string]$Message,[ValidateSet('INFO','OK','WARNING','ERROR','INPUT')][string]$Level='INFO')
     if ($script:SirkInstallerLogPath) { Add-Content -LiteralPath $script:SirkInstallerLogPath -Value ('{0:o} [{1}] {2}' -f (Get-Date),$Level,$Message) -Encoding UTF8 }
 }
+function Format-SirkBytes {
+    param([Parameter(Mandatory)][double]$Bytes)
+    if ($Bytes -ge 1GB) { return ('{0:N2} GB' -f ($Bytes / 1GB)) }
+    if ($Bytes -ge 1MB) { return ('{0:N1} MB' -f ($Bytes / 1MB)) }
+    if ($Bytes -ge 1KB) { return ('{0:N1} KB' -f ($Bytes / 1KB)) }
+    return ('{0:N0} B' -f $Bytes)
+}
 function Write-SirkBanner { param([Parameter(Mandatory)][string]$Title) Write-Host "`n============================================================" -ForegroundColor Cyan; Write-Host " $Title" -ForegroundColor Cyan; Write-Host '============================================================' -ForegroundColor Cyan; Write-SirkLog $Title }
 function Write-SirkStep { param([Parameter(Mandatory)][int]$Number,[Parameter(Mandatory)][int]$Total,[Parameter(Mandatory)][string]$Text) $message='[{0:D2}/{1:D2}] {2}' -f $Number,$Total,$Text; Write-Host "`n$message" -ForegroundColor Cyan; Write-SirkLog $message }
 function Write-SirkOk { param([Parameter(Mandatory)][string]$Text) Write-Host "[OK] $Text" -ForegroundColor Green; Write-SirkLog $Text OK }
@@ -43,10 +50,11 @@ function Invoke-SirkDownload {
             $buffer=New-Object byte[] 1048576; $readTotal=[int64]0; $watch=[Diagnostics.Stopwatch]::StartNew()
             while (($read=$input.Read($buffer,0,$buffer.Length)) -gt 0) {
                 $output.Write($buffer,0,$read); $readTotal+=$read; $elapsed=[Math]::Max($watch.Elapsed.TotalSeconds,0.1); $speed=$readTotal/$elapsed; $percent=if($total -gt 0){[Math]::Min(100,[int](($readTotal*100)/$total))}else{0}
-                $status=if($total -gt 0){'{0:N1} MB / {1:N1} MB | {2:N1} MB/s' -f ($readTotal/1MB),($total/1MB),($speed/1MB)}else{'{0:N1} MB | {1:N1} MB/s' -f ($readTotal/1MB),($speed/1MB)}
+                $status=if($total -gt 0){'{0} / {1} | {2}/s' -f (Format-SirkBytes $readTotal),(Format-SirkBytes $total),(Format-SirkBytes $speed)}else{'{0} | {1}/s' -f (Format-SirkBytes $readTotal),(Format-SirkBytes $speed)}
                 Write-Progress -Activity "Downloading $DisplayName" -Status $status -PercentComplete $percent
             }
-            Write-Progress -Activity "Downloading $DisplayName" -Completed; Write-SirkOk "$DisplayName downloaded: $([Math]::Round($readTotal/1MB,1)) MB."
+            Write-Progress -Activity "Downloading $DisplayName" -Completed
+            Write-SirkOk "$DisplayName downloaded: $(Format-SirkBytes $readTotal)."
         } finally { $output.Dispose(); $input.Dispose() }
     } finally { $response.Dispose() }
 }
