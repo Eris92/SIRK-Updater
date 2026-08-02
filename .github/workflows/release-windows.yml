@@ -7,8 +7,8 @@ on:
       - 'src/**'
       - 'test/**'
       - 'Directory.Build.props'
-      - 'install.ps1'
-      - 'install-release.ps1'
+      - 'global.json'
+      - 'install-release-v2.ps1'
       - '.github/workflows/release-windows.yml'
   workflow_dispatch:
 
@@ -26,6 +26,20 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+
+      - name: Enforce .NET 10 and release-only contract
+        shell: pwsh
+        run: |
+          if (Test-Path install.ps1) { throw 'Legacy source installer install.ps1 is forbidden.' }
+          if (Test-Path install-release.ps1) { throw 'Legacy fallback installer install-release.ps1 is forbidden.' }
+          if (-not (Test-Path install-release-v2.ps1)) { throw 'Canonical release installer is missing.' }
+          $legacy = Get-ChildItem . -Recurse -File -Include *.csproj,*.props,*.targets,*.ps1,*.yml,*.yaml |
+            Where-Object FullName -notmatch '\\.git\\' |
+            Select-String -Pattern 'net[1-9]\.0|AllowSourceFallback|--self-contained\s+true|PublishSingleFile=true'
+          if ($legacy) {
+            $legacy | ForEach-Object { Write-Error "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }
+            throw 'Legacy compatibility or source-build contract detected.'
+          }
 
       - name: Build and test
         shell: pwsh
@@ -55,24 +69,23 @@ jobs:
         run: |
           $payload = Join-Path $PWD 'publish/payload'
           New-Item -ItemType Directory -Path $payload -Force | Out-Null
-
           Copy-Item 'publish/service/*' $payload -Recurse -Force
           Copy-Item 'publish/cli/*' $payload -Recurse -Force
 
           $cliAppHost = Join-Path $payload 'SirkUpdater.Cli.exe'
-          if (-not (Test-Path $cliAppHost)) {
-            throw 'Published CLI application host not found.'
-          }
+          if (-not (Test-Path $cliAppHost)) { throw 'Published CLI application host not found.' }
           Move-Item $cliAppHost (Join-Path $payload 'SirkUpdater.exe') -Force
 
           @{
-            schemaVersion = 1
+            schemaVersion = 2
             applicationId = 'sirk-updater'
             version = $env:VERSION
             architecture = 'win-x64'
             deploymentMode = 'framework-dependent'
             targetFramework = 'net10.0'
             requiredRuntime = 'Microsoft.NETCore.App 10.0'
+            compatibilityMode = $false
+            sourceBuildAllowed = $false
             commit = '${{ github.sha }}'
           } | ConvertTo-Json -Depth 5 |
             Set-Content (Join-Path $payload 'release-manifest.json') -Encoding UTF8
@@ -88,8 +101,8 @@ jobs:
 
           $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $zipName" | Set-Content "$zipPath.sha256" -Encoding ASCII
-
           $sizeMb = [Math]::Round((Get-Item $zipPath).Length / 1MB, 2)
+          if ($sizeMb -gt 15) { throw "Release package exceeds 15 MB: $sizeMb MB" }
           Write-Host "Release package size: $sizeMb MB"
 
           "ZIP_NAME=$zipName" | Out-File $env:GITHUB_ENV -Append
