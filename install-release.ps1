@@ -43,6 +43,32 @@ function Remove-ExistingService {
     throw 'SIRK Updater service is pending deletion. Restart Windows and retry.'
 }
 
+function Invoke-SourceFallback {
+    param([Parameter(Mandatory)][string]$InstallerPath)
+
+    Write-SirkWarning 'No release ZIP is available. Building SIRK Updater from source.'
+    Write-SirkWarning 'This can take several minutes on a fresh Windows installation.'
+
+    $process = Start-Process -FilePath 'powershell.exe' -ArgumentList @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $InstallerPath)
+    ) -PassThru -NoNewWindow
+
+    $started = Get-Date
+    while (-not $process.HasExited) {
+        Start-Sleep -Seconds 5
+        $process.Refresh()
+        $elapsed = (Get-Date) - $started
+        $cpu = try { [Math]::Round($process.TotalProcessorTime.TotalSeconds, 1) } catch { 0 }
+        Write-Host ("[BUILD] SIRK Updater source build running... {0:hh\:mm\:ss} | CPU {1:N1}s" -f $elapsed, $cpu) -ForegroundColor DarkCyan
+    }
+
+    if ($process.ExitCode -ne 0) {
+        throw "Source bootstrap failed with ExitCode=$($process.ExitCode)."
+    }
+
+    Write-SirkOk 'SIRK Updater source build completed.'
+}
+
 try {
     New-Item -ItemType Directory -Path $WorkRoot, $DataRoot -Force | Out-Null
     Invoke-WebRequest -UseBasicParsing -Uri ('https://raw.githubusercontent.com/Eris92/SIRK-Updater/main/tools/install/SirkInstaller.Console.psm1?nocache=' + [guid]::NewGuid()) -OutFile $FrameworkPath
@@ -56,11 +82,9 @@ try {
     }
     catch {
         if (-not $AllowSourceFallback) { throw }
-        Write-SirkWarning 'No usable GitHub release found. Falling back to source bootstrap.'
         $fallback = Join-Path $WorkRoot 'install-source.ps1'
         Invoke-SirkDownload -Uri 'https://raw.githubusercontent.com/Eris92/SIRK-Updater/main/install.ps1' -Destination $fallback -DisplayName 'SIRK Updater source installer'
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $fallback
-        if ($LASTEXITCODE -ne 0) { throw "Source bootstrap failed with ExitCode=$LASTEXITCODE." }
+        Invoke-SourceFallback -InstallerPath $fallback
         return
     }
 
