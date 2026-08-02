@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'src/**'
+      - 'test/**'
       - 'Directory.Build.props'
       - 'install.ps1'
       - 'install-release.ps1'
@@ -26,21 +27,26 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Build and test
+        shell: pwsh
+        run: |
+          dotnet restore SIRK-Updater.sln
+          dotnet build SIRK-Updater.sln -c Release --no-restore
+          dotnet test SIRK-Updater.sln -c Release --no-build
+
       - name: Publish service
         shell: pwsh
         run: |
-          dotnet restore src/SirkUpdater.Service/SirkUpdater.Service.csproj -r win-x64
           dotnet publish src/SirkUpdater.Service/SirkUpdater.Service.csproj `
-            -c Release -r win-x64 --self-contained false --no-restore `
+            -c Release -r win-x64 --self-contained false `
             -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false `
             -o publish/service
 
       - name: Publish CLI
         shell: pwsh
         run: |
-          dotnet restore src/SirkUpdater.Cli/SirkUpdater.Cli.csproj -r win-x64
           dotnet publish src/SirkUpdater.Cli/SirkUpdater.Cli.csproj `
-            -c Release -r win-x64 --self-contained false --no-restore `
+            -c Release -r win-x64 --self-contained false `
             -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false `
             -o publish/cli
 
@@ -59,20 +65,6 @@ jobs:
           }
           Move-Item $cliAppHost (Join-Path $payload 'SirkUpdater.exe') -Force
 
-          foreach ($required in @(
-            'SirkUpdater.Service.exe',
-            'SirkUpdater.Service.dll',
-            'SirkUpdater.Service.runtimeconfig.json',
-            'SirkUpdater.exe',
-            'SirkUpdater.Cli.dll',
-            'SirkUpdater.Cli.runtimeconfig.json',
-            'SirkUpdater.Core.dll'
-          )) {
-            if (-not (Test-Path (Join-Path $payload $required))) {
-              throw "Release payload is missing: $required"
-            }
-          }
-
           @{
             schemaVersion = 1
             applicationId = 'sirk-updater'
@@ -89,13 +81,15 @@ jobs:
           $zipPath = Join-Path $PWD $zipName
           Compress-Archive -Path "$payload/*" -DestinationPath $zipPath -CompressionLevel Optimal
 
+          ./test/release-package-contract.ps1 `
+            -ServicePublish ./publish/service `
+            -CliPublish ./publish/cli `
+            -PackagePath $zipPath
+
           $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $zipName" | Set-Content "$zipPath.sha256" -Encoding ASCII
 
           $sizeMb = [Math]::Round((Get-Item $zipPath).Length / 1MB, 2)
-          if ($sizeMb -gt 15) {
-            throw "Framework-dependent package is unexpectedly large: $sizeMb MB"
-          }
           Write-Host "Release package size: $sizeMb MB"
 
           "ZIP_NAME=$zipName" | Out-File $env:GITHUB_ENV -Append
