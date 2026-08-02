@@ -23,7 +23,6 @@ public sealed class TransactionalUpdateEngine
         _root = Path.GetFullPath(root ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "SIRK", "Updater"));
-
         handler ??= new HttpClientHandler
         {
             ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
@@ -35,7 +34,6 @@ public sealed class TransactionalUpdateEngine
     {
         ArgumentNullException.ThrowIfNull(request);
         var manifest = _registry.Get(request.ApplicationId);
-
         var operationId = DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssfffZ") + "-" + Guid.NewGuid().ToString("N")[..8];
         var operationRoot = Path.Combine(_root, "operations", manifest.ApplicationId, operationId);
         var stagingRoot = Path.Combine(operationRoot, "staging");
@@ -43,9 +41,13 @@ public sealed class TransactionalUpdateEngine
         var statePath = Path.Combine(operationRoot, "state.json");
         var maintenancePath = Path.Combine(manifest.DataRoot, "maintenance.lock");
         var started = DateTimeOffset.UtcNow;
+        var backupReady = false;
+        var applicationStopped = false;
+        var watchdogStopped = false;
+        var installationTouched = false;
 
         Directory.CreateDirectory(operationRoot);
-        UpdateState state = NewState(UpdatePhase.Queued, 0, "Operation queued.");
+        var state = NewState(UpdatePhase.Queued, 0, "Operation queued.");
         Persist(statePath, state);
 
         try
@@ -65,6 +67,7 @@ public sealed class TransactionalUpdateEngine
 
             state = Set(UpdatePhase.BackingUp, 15, "Creating application backup.");
             CopyDirectory(manifest.InstallRoot, backupRoot);
+            backupReady = true;
 
             state = Set(UpdatePhase.Maintenance, 25, "Entering maintenance mode.");
             Directory.CreateDirectory(manifest.DataRoot);
@@ -77,17 +80,23 @@ public sealed class TransactionalUpdateEngine
             }, JsonOptions));
 
             if (!string.IsNullOrWhiteSpace(manifest.WatchdogServiceName))
+            {
                 StopService(manifest.WatchdogServiceName!, allowNotRunning: true);
+                watchdogStopped = true;
+            }
 
             state = Set(UpdatePhase.Stopping, 35, "Stopping application service.");
             StopService(manifest.ServiceName, allowNotRunning: true);
+            applicationStopped = true;
 
             state = Set(UpdatePhase.Installing, 50, "Installing verified package.");
+            installationTouched = true;
             MirrorDirectory(payloadRoot, manifest.InstallRoot);
 
             state = Set(UpdatePhase.Starting, 75, "Starting application service.");
             ConfigureAutomatic(manifest.ServiceName);
             StartService(manifest.ServiceName);
+            applicationStopped = false;
 
             state = Set(UpdatePhase.HealthChecking, 85, "Waiting for application health.");
             await WaitForHealthAsync(manifest, request.HealthTimeout, cancellationToken);
@@ -96,6 +105,7 @@ public sealed class TransactionalUpdateEngine
             {
                 ConfigureAutomatic(manifest.WatchdogServiceName!);
                 StartService(manifest.WatchdogServiceName!, allowAlreadyRunning: true);
+                watchdogStopped = false;
             }
 
             TryDelete(maintenancePath);
@@ -106,29 +116,34 @@ public sealed class TransactionalUpdateEngine
         {
             try
             {
-                state = Set(UpdatePhase.RollingBack, 90, "Update failed. Restoring backup.", updateError.Message);
-                StopService(manifest.ServiceName, allowNotRunning: true);
-                if (!Directory.Exists(backupRoot))
-                    throw new DirectoryNotFoundException("Rollback backup is unavailable because installation did not begin.");
-                MirrorDirectory(backupRoot, manifest.InstallRoot);
-                ConfigureAutomatic(manifest.ServiceName);
-                StartService(manifest.ServiceName);
-                await WaitForHealthAsync(manifest, request.HealthTimeout, cancellationToken);
+                if (installationTouched)
+                {
+                    state = Set(UpdatePhase.RollingBack, 90, "Update failed. Restoring backup.", updateError.Message);
+                    StopService(manifest.ServiceName, allowNotRunning: true);
+                    applicationStopped = true;
+                    if (!backupReady || !Directory.Exists(backupRoot))
+                        throw new DirectoryNotFoundException("Rollback backup is unavailable.");
+                    MirrorDirectory(backupRoot, manifest.InstallRoot);
+                }
 
-                if (!string.IsNullOrWhiteSpace(manifest.WatchdogServiceName))
+                if (applicationStopped)
+                {
+                    ConfigureAutomatic(manifest.ServiceName);
+                    StartService(manifest.ServiceName, allowAlreadyRunning: true);
+                    applicationStopped = false;
+                    await WaitForHealthAsync(manifest, request.HealthTimeout, cancellationToken);
+                }
+
+                if (watchdogStopped && !string.IsNullOrWhiteSpace(manifest.WatchdogServiceName))
                 {
                     ConfigureAutomatic(manifest.WatchdogServiceName!);
                     StartService(manifest.WatchdogServiceName!, allowAlreadyRunning: true);
+                    watchdogStopped = false;
                 }
-            }
-            catch (DirectoryNotFoundException) when (!Directory.Exists(backupRoot))
-            {
-                // Verification failed before any service or installation state was changed.
-                // There is nothing to roll back and the running application remains intact.
             }
             catch (Exception rollbackError)
             {
-                updateError = new AggregateException("Update and rollback failed.", updateError, rollbackError);
+                updateError = new AggregateException("Update and recovery failed.", updateError, rollbackError);
             }
             finally
             {
@@ -138,7 +153,10 @@ public sealed class TransactionalUpdateEngine
                     TryConfigureAutomatic(manifest.WatchdogServiceName!);
             }
 
-            state = Set(UpdatePhase.Failed, 100, "Update failed; rollback was attempted when installation had started.", updateError.ToString(), completed: true);
+            var message = installationTouched
+                ? "Update failed; rollback was attempted."
+                : "Update was rejected before the installed application was modified.";
+            state = Set(UpdatePhase.Failed, 100, message, updateError.ToString(), completed: true);
             throw new UpdateFailedException(state, updateError);
         }
 
@@ -191,7 +209,6 @@ public sealed class TransactionalUpdateEngine
         var verifier = Path.GetFullPath(manifest.SignatureVerifierPath!);
         if (!File.Exists(verifier))
             throw new FileNotFoundException("Configured signature verifier was not found.", verifier);
-
         var arguments = manifest.SignatureVerifierArguments
             .Select(value => value.Replace("{payload}", payloadRoot, StringComparison.Ordinal))
             .ToArray();
@@ -207,7 +224,6 @@ public sealed class TransactionalUpdateEngine
             await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
             return;
         }
-
         var deadline = DateTimeOffset.UtcNow + timeout;
         Exception? last = null;
         while (DateTimeOffset.UtcNow < deadline)
@@ -242,7 +258,7 @@ public sealed class TransactionalUpdateEngine
         var output = result.Output;
         if (result.ExitCode != 0 && !(allowNotRunning && (output.Contains("1062") || output.Contains("SERVICE_NOT_ACTIVE", StringComparison.OrdinalIgnoreCase))))
             throw new InvalidOperationException($"Unable to stop service {name}: {output}");
-        WaitService(name, "STOPPED", TimeSpan.FromMinutes(2));
+        if (result.ExitCode == 0) WaitService(name, "STOPPED", TimeSpan.FromMinutes(2));
     }
 
     private static void StartService(string name, bool allowAlreadyRunning = false)
