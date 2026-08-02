@@ -35,8 +35,6 @@ public sealed class TransactionalUpdateEngine
     {
         ArgumentNullException.ThrowIfNull(request);
         var manifest = _registry.Get(request.ApplicationId);
-        if (manifest.SignatureRequired)
-            throw new InvalidOperationException("Detached package signature verification is required by this manifest but is not available in updater protocol v1.");
 
         var operationId = DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmssfffZ") + "-" + Guid.NewGuid().ToString("N")[..8];
         var operationRoot = Path.Combine(_root, "operations", manifest.ApplicationId, operationId);
@@ -52,8 +50,18 @@ public sealed class TransactionalUpdateEngine
 
         try
         {
-            state = Set(UpdatePhase.Verifying, 5, "Verifying update package.");
+            state = Set(UpdatePhase.Verifying, 5, "Verifying update package checksum and archive safety.");
             await VerifyPackageAsync(request, cancellationToken);
+
+            Directory.CreateDirectory(stagingRoot);
+            ZipFile.ExtractToDirectory(request.PackagePath, stagingRoot, overwriteFiles: true);
+            var payloadRoot = ResolvePayloadRoot(stagingRoot);
+
+            if (manifest.SignatureRequired)
+            {
+                state = Set(UpdatePhase.Verifying, 10, "Verifying signed application payload.");
+                VerifySignedPayload(manifest, payloadRoot);
+            }
 
             state = Set(UpdatePhase.BackingUp, 15, "Creating application backup.");
             CopyDirectory(manifest.InstallRoot, backupRoot);
@@ -74,10 +82,7 @@ public sealed class TransactionalUpdateEngine
             state = Set(UpdatePhase.Stopping, 35, "Stopping application service.");
             StopService(manifest.ServiceName, allowNotRunning: true);
 
-            state = Set(UpdatePhase.Installing, 50, "Extracting and installing package.");
-            Directory.CreateDirectory(stagingRoot);
-            ZipFile.ExtractToDirectory(request.PackagePath, stagingRoot, overwriteFiles: true);
-            var payloadRoot = ResolvePayloadRoot(stagingRoot);
+            state = Set(UpdatePhase.Installing, 50, "Installing verified package.");
             MirrorDirectory(payloadRoot, manifest.InstallRoot);
 
             state = Set(UpdatePhase.Starting, 75, "Starting application service.");
@@ -103,7 +108,8 @@ public sealed class TransactionalUpdateEngine
             {
                 state = Set(UpdatePhase.RollingBack, 90, "Update failed. Restoring backup.", updateError.Message);
                 StopService(manifest.ServiceName, allowNotRunning: true);
-                if (!Directory.Exists(backupRoot)) throw new DirectoryNotFoundException("Rollback backup is unavailable.");
+                if (!Directory.Exists(backupRoot))
+                    throw new DirectoryNotFoundException("Rollback backup is unavailable because installation did not begin.");
                 MirrorDirectory(backupRoot, manifest.InstallRoot);
                 ConfigureAutomatic(manifest.ServiceName);
                 StartService(manifest.ServiceName);
@@ -114,6 +120,11 @@ public sealed class TransactionalUpdateEngine
                     ConfigureAutomatic(manifest.WatchdogServiceName!);
                     StartService(manifest.WatchdogServiceName!, allowAlreadyRunning: true);
                 }
+            }
+            catch (DirectoryNotFoundException) when (!Directory.Exists(backupRoot))
+            {
+                // Verification failed before any service or installation state was changed.
+                // There is nothing to roll back and the running application remains intact.
             }
             catch (Exception rollbackError)
             {
@@ -127,7 +138,7 @@ public sealed class TransactionalUpdateEngine
                     TryConfigureAutomatic(manifest.WatchdogServiceName!);
             }
 
-            state = Set(UpdatePhase.Failed, 100, "Update failed; rollback was attempted.", updateError.ToString(), completed: true);
+            state = Set(UpdatePhase.Failed, 100, "Update failed; rollback was attempted when installation had started.", updateError.ToString(), completed: true);
             throw new UpdateFailedException(state, updateError);
         }
 
@@ -173,6 +184,20 @@ public sealed class TransactionalUpdateEngine
             if (normalized.StartsWith('/') || normalized.Split('/').Any(segment => segment == ".."))
                 throw new InvalidDataException($"Unsafe ZIP entry: {entry.FullName}");
         }
+    }
+
+    private static void VerifySignedPayload(ApplicationManifest manifest, string payloadRoot)
+    {
+        var verifier = Path.GetFullPath(manifest.SignatureVerifierPath!);
+        if (!File.Exists(verifier))
+            throw new FileNotFoundException("Configured signature verifier was not found.", verifier);
+
+        var arguments = manifest.SignatureVerifierArguments
+            .Select(value => value.Replace("{payload}", payloadRoot, StringComparison.Ordinal))
+            .ToArray();
+        var result = Run(verifier, arguments);
+        if (result.ExitCode != 0)
+            throw new CryptographicException($"Application signature verification failed: {result.Output}");
     }
 
     private async Task WaitForHealthAsync(ApplicationManifest manifest, TimeSpan timeout, CancellationToken cancellationToken)
