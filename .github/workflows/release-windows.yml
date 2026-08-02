@@ -6,6 +6,7 @@ on:
     paths:
       - 'src/**'
       - 'test/**'
+      - 'tests/**'
       - 'Directory.Build.props'
       - 'global.json'
       - 'install-release-v2.ps1'
@@ -30,14 +31,26 @@ jobs:
       - name: Enforce .NET 10 and release-only contract
         shell: pwsh
         run: |
-          if (Test-Path install.ps1) { throw 'Legacy source installer install.ps1 is forbidden.' }
-          if (Test-Path install-release.ps1) { throw 'Legacy fallback installer install-release.ps1 is forbidden.' }
+          if (Test-Path install.ps1) { throw 'Legacy source installer is forbidden.' }
+          if (Test-Path install-release.ps1) { throw 'Legacy fallback installer is forbidden.' }
           if (-not (Test-Path install-release-v2.ps1)) { throw 'Canonical release installer is missing.' }
-          $legacy = Get-ChildItem . -Recurse -File -Include *.csproj,*.props,*.targets,*.ps1,*.yml,*.yaml |
-            Where-Object FullName -notmatch '\\.git\\' |
-            Select-String -Pattern 'net[1-9]\.0|AllowSourceFallback|--self-contained\s+true|PublishSingleFile=true'
+          $files = Get-ChildItem src -Recurse -File -Include *.csproj,*.props,*.targets,*.ps1 -ErrorAction SilentlyContinue
+          $files += Get-Item install-release-v2.ps1
+          $patterns = @(
+            'net(?:8|9)\.0',
+            ('AllowSource' + 'Fallback'),
+            '--self-contained\s+true',
+            'PublishSingleFile=true'
+          )
+          $legacy = @()
+          foreach ($file in $files) {
+            $text = Get-Content $file.FullName -Raw
+            foreach ($pattern in $patterns) {
+              if ($text -match $pattern) { $legacy += "$($file.FullName) => $pattern" }
+            }
+          }
           if ($legacy) {
-            $legacy | ForEach-Object { Write-Error "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }
+            $legacy | ForEach-Object { Write-Error $_ }
             throw 'Legacy compatibility or source-build contract detected.'
           }
 
@@ -47,6 +60,8 @@ jobs:
           dotnet restore SIRK-Updater.sln
           dotnet build SIRK-Updater.sln -c Release --no-restore
           dotnet test SIRK-Updater.sln -c Release --no-build
+          ./tests/install-release-contract.ps1
+          ./tests/delegated-signature-contract.ps1
 
       - name: Publish service
         shell: pwsh
