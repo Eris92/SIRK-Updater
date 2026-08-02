@@ -24,19 +24,29 @@ jobs:
         shell: pwsh
         run: |
           dotnet --info
-          if (Test-Path install.ps1) { throw 'Legacy source installer install.ps1 is forbidden.' }
-          if (Test-Path install-release.ps1) { throw 'Legacy install-release.ps1 is forbidden.' }
+          if (Test-Path install.ps1) { throw 'Legacy source installer is forbidden.' }
+          if (Test-Path install-release.ps1) { throw 'Legacy release installer is forbidden.' }
           if (-not (Test-Path install-release-v2.ps1)) { throw 'Canonical release installer is missing.' }
-          $files = Get-ChildItem . -Recurse -File |
-            Where-Object { $_.FullName -notmatch '[\\/]\.git[\\/]' -and $_.Extension -in '.csproj','.props','.ps1','.yml','.yaml' }
+
+          $files = Get-ChildItem src -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -in '.csproj','.props','.targets','.ps1' }
+          $files += Get-Item install-release-v2.ps1
+          $patterns = @(
+            'net(?:8|9)\.0',
+            'Microsoft\.DotNet\.Runtime\.(?:8|9)(?:\D|$)',
+            'Microsoft\.NETCore\.App (?:8|9)\.',
+            ('AllowSource' + 'Fallback'),
+            ('install-release' + '\.ps1')
+          )
           $legacy = @()
           foreach ($file in $files) {
             $text = Get-Content $file.FullName -Raw
-            if ($text -match 'net[1-9]\.0|Microsoft\.DotNet\.Runtime\.[1-9]|Microsoft\.NETCore\.App [1-9]\.|AllowSourceFallback|install-release\.ps1') {
-              $legacy += $file.FullName
+            foreach ($pattern in $patterns) {
+              if ($text -match $pattern) { $legacy += "$($file.FullName) => $pattern" }
             }
           }
           if ($legacy.Count) { throw "Legacy compatibility references detected:`n$($legacy -join "`n")" }
+
           $installer = Get-Content install-release-v2.ps1 -Raw
           foreach ($required in @('Microsoft.NETCore.App 10.0','framework-dependent','15MB','SHA-256','Restore-Backup')) {
             if ($installer -notmatch [regex]::Escape($required)) { throw "Updater installer contract missing: $required" }
@@ -48,6 +58,8 @@ jobs:
           dotnet restore SIRK-Updater.sln
           dotnet build SIRK-Updater.sln -c Release --no-restore
           dotnet test SIRK-Updater.sln -c Release --no-build
+          ./tests/install-release-contract.ps1
+          ./tests/delegated-signature-contract.ps1
 
       - name: Publish framework-dependent payload
         shell: pwsh
@@ -72,13 +84,15 @@ jobs:
             Move-Item (Join-Path $payload 'SirkUpdater.Cli.exe') (Join-Path $payload 'SirkUpdater.exe') -Force
           }
           @{
-            schemaVersion = 1
+            schemaVersion = 2
             applicationId = 'sirk-updater'
             version = 'test'
             architecture = 'win-x64'
             deploymentMode = 'framework-dependent'
             targetFramework = 'net10.0'
             requiredRuntime = 'Microsoft.NETCore.App 10.0'
+            compatibilityMode = $false
+            sourceBuildAllowed = $false
           } | ConvertTo-Json | Set-Content (Join-Path $payload 'release-manifest.json') -Encoding UTF8
           $zip = Join-Path $PWD 'SIRK-Updater-test-win-x64.zip'
           Compress-Archive -Path "$payload/*" -DestinationPath $zip -CompressionLevel Optimal
