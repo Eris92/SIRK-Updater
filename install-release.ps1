@@ -17,6 +17,7 @@ $WorkRoot = Join-Path $env:TEMP ('SIRK-Updater-Release-' + [guid]::NewGuid().ToS
 $FrameworkPath = Join-Path $WorkRoot 'SirkInstaller.Console.psm1'
 $LogPath = 'C:\ProgramData\SIRK\Logs\Updater-Install.log'
 $TotalSteps = 7
+$InstallSucceeded = $false
 
 function Get-ReleaseMetadata {
     $headers = @{ 'User-Agent' = 'SIRK-Updater-Installer' }
@@ -49,9 +50,21 @@ function Invoke-SourceFallback {
     Write-SirkWarning 'No release ZIP is available. Building SIRK Updater from source.'
     Write-SirkWarning 'This can take several minutes on a fresh Windows installation.'
 
-    $process = Start-Process -FilePath 'powershell.exe' -ArgumentList @(
-        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $InstallerPath)
-    ) -PassThru -NoNewWindow
+    $stdoutPath = Join-Path $WorkRoot 'source-build.stdout.log'
+    $stderrPath = Join-Path $WorkRoot 'source-build.stderr.log'
+    $arguments = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', ('"{0}"' -f $InstallerPath)
+    )
+
+    $process = Start-Process `
+        -FilePath 'powershell.exe' `
+        -ArgumentList $arguments `
+        -PassThru `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $stdoutPath `
+        -RedirectStandardError $stderrPath
 
     $started = Get-Date
     while (-not $process.HasExited) {
@@ -59,14 +72,50 @@ function Invoke-SourceFallback {
         $process.Refresh()
         $elapsed = (Get-Date) - $started
         $cpu = try { [Math]::Round($process.TotalProcessorTime.TotalSeconds, 1) } catch { 0 }
-        Write-Host ("[BUILD] SIRK Updater source build running... {0:hh\:mm\:ss} | CPU {1:N1}s" -f $elapsed, $cpu) -ForegroundColor DarkCyan
+        $phase = 'working'
+        if (Test-Path -LiteralPath $stdoutPath) {
+            $lastLine = Get-Content -LiteralPath $stdoutPath -Tail 1 -ErrorAction SilentlyContinue
+            if ($lastLine) { $phase = ($lastLine -replace '\s+', ' ').Trim() }
+            if ($phase.Length -gt 80) { $phase = $phase.Substring(0, 80) + '...' }
+        }
+        Write-Host ("[BUILD] {0:hh\:mm\:ss} | CPU {1:N1}s | {2}" -f $elapsed, $cpu, $phase) -ForegroundColor DarkCyan
     }
 
-    if ($process.ExitCode -ne 0) {
-        throw "Source bootstrap failed with ExitCode=$($process.ExitCode)."
+    $process.WaitForExit()
+    $process.Refresh()
+    $exitCode = [int]$process.ExitCode
+
+    $stdout = if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw -ErrorAction SilentlyContinue } else { '' }
+    $stderr = if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue } else { '' }
+
+    if ($exitCode -ne 0) {
+        Write-SirkError "Source bootstrap failed with ExitCode=$exitCode."
+        if ($stdout) {
+            Write-Host "`n--- source build stdout (last 80 lines) ---" -ForegroundColor Yellow
+            Get-Content -LiteralPath $stdoutPath -Tail 80 | Out-Host
+        }
+        if ($stderr) {
+            Write-Host "`n--- source build stderr (last 80 lines) ---" -ForegroundColor Red
+            Get-Content -LiteralPath $stderrPath -Tail 80 | Out-Host
+        }
+        throw "Source bootstrap failed with ExitCode=$exitCode. Work directory retained: $WorkRoot"
     }
 
-    Write-SirkOk 'SIRK Updater source build completed.'
+    $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    $cli = Join-Path $InstallRoot 'SirkUpdater.exe'
+    if (-not $service -or $service.Status -ne 'Running' -or -not (Test-Path -LiteralPath $cli)) {
+        if ($stdout) {
+            Write-Host "`n--- source build stdout (last 80 lines) ---" -ForegroundColor Yellow
+            Get-Content -LiteralPath $stdoutPath -Tail 80 | Out-Host
+        }
+        if ($stderr) {
+            Write-Host "`n--- source build stderr (last 80 lines) ---" -ForegroundColor Red
+            Get-Content -LiteralPath $stderrPath -Tail 80 | Out-Host
+        }
+        throw "Source bootstrap returned success, but SIRK Updater is not healthy. Work directory retained: $WorkRoot"
+    }
+
+    Write-SirkOk 'SIRK Updater source build completed and service is running.'
 }
 
 try {
@@ -85,6 +134,7 @@ try {
         $fallback = Join-Path $WorkRoot 'install-source.ps1'
         Invoke-SirkDownload -Uri 'https://raw.githubusercontent.com/Eris92/SIRK-Updater/main/install.ps1' -Destination $fallback -DisplayName 'SIRK Updater source installer'
         Invoke-SourceFallback -InstallerPath $fallback
+        $InstallSucceeded = $true
         return
     }
 
@@ -151,11 +201,17 @@ try {
         'Install root' = $InstallRoot
         'Data root' = $DataRoot
     }) -SuccessCode 'SIRK_UPDATER_RELEASE_INSTALL_OK'
+    $InstallSucceeded = $true
 }
 catch {
     if (Get-Command Write-SirkError -ErrorAction SilentlyContinue) { Write-SirkError $_.Exception.Message }
     throw
 }
 finally {
-    Remove-Item -LiteralPath $WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
+    if ($InstallSucceeded) {
+        Remove-Item -LiteralPath $WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    elseif (Test-Path -LiteralPath $WorkRoot) {
+        Write-Host "[DIAGNOSTICS] Work directory retained: $WorkRoot" -ForegroundColor Yellow
+    }
 }
