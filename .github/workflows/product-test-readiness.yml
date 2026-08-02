@@ -1,0 +1,96 @@
+name: SIRK Updater Product Test Readiness
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  updater-readiness:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Validate .NET 10 and release-only contract
+        shell: pwsh
+        run: |
+          dotnet --info
+          if (Test-Path install.ps1) { throw 'Legacy source installer install.ps1 is forbidden.' }
+          if (Test-Path install-release.ps1) { throw 'Legacy install-release.ps1 is forbidden.' }
+          if (-not (Test-Path install-release-v2.ps1)) { throw 'Canonical release installer is missing.' }
+          $files = Get-ChildItem . -Recurse -File |
+            Where-Object { $_.FullName -notmatch '[\\/]\.git[\\/]' -and $_.Extension -in '.csproj','.props','.ps1','.yml','.yaml' }
+          $legacy = @()
+          foreach ($file in $files) {
+            $text = Get-Content $file.FullName -Raw
+            if ($text -match 'net[1-9]\.0|Microsoft\.DotNet\.Runtime\.[1-9]|Microsoft\.NETCore\.App [1-9]\.|AllowSourceFallback|install-release\.ps1') {
+              $legacy += $file.FullName
+            }
+          }
+          if ($legacy.Count) { throw "Legacy compatibility references detected:`n$($legacy -join "`n")" }
+          $installer = Get-Content install-release-v2.ps1 -Raw
+          foreach ($required in @('Microsoft.NETCore.App 10.0','framework-dependent','15MB','SHA-256','Restore-Backup')) {
+            if ($installer -notmatch [regex]::Escape($required)) { throw "Updater installer contract missing: $required" }
+          }
+
+      - name: Restore build and test
+        shell: pwsh
+        run: |
+          dotnet restore SIRK-Updater.sln
+          dotnet build SIRK-Updater.sln -c Release --no-restore
+          dotnet test SIRK-Updater.sln -c Release --no-build
+
+      - name: Publish framework-dependent payload
+        shell: pwsh
+        run: |
+          dotnet publish src/SirkUpdater.Service/SirkUpdater.Service.csproj `
+            -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false `
+            -o publish/service
+          dotnet publish src/SirkUpdater.Cli/SirkUpdater.Cli.csproj `
+            -c Release -r win-x64 --self-contained false `
+            -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false `
+            -o publish/cli
+
+      - name: Build and validate release ZIP
+        shell: pwsh
+        run: |
+          $payload = Join-Path $PWD 'publish/payload'
+          New-Item -ItemType Directory -Path $payload -Force | Out-Null
+          Copy-Item 'publish/service/*' $payload -Recurse -Force
+          Copy-Item 'publish/cli/*' $payload -Recurse -Force
+          if (Test-Path (Join-Path $payload 'SirkUpdater.Cli.exe')) {
+            Move-Item (Join-Path $payload 'SirkUpdater.Cli.exe') (Join-Path $payload 'SirkUpdater.exe') -Force
+          }
+          @{
+            schemaVersion = 1
+            applicationId = 'sirk-updater'
+            version = 'test'
+            architecture = 'win-x64'
+            deploymentMode = 'framework-dependent'
+            targetFramework = 'net10.0'
+            requiredRuntime = 'Microsoft.NETCore.App 10.0'
+          } | ConvertTo-Json | Set-Content (Join-Path $payload 'release-manifest.json') -Encoding UTF8
+          $zip = Join-Path $PWD 'SIRK-Updater-test-win-x64.zip'
+          Compress-Archive -Path "$payload/*" -DestinationPath $zip -CompressionLevel Optimal
+          ./test/release-package-contract.ps1 `
+            -ServicePublish ./publish/service `
+            -CliPublish ./publish/cli `
+            -PackagePath $zip
+          $sizeMb = [Math]::Round((Get-Item $zip).Length / 1MB, 2)
+          if ($sizeMb -gt 15) { throw "Updater ZIP exceeds 15 MB: $sizeMb MB" }
+          Write-Host "Updater ZIP: $sizeMb MB"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sirk-updater-test-release
+          path: SIRK-Updater-test-win-x64.zip
