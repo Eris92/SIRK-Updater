@@ -23,6 +23,24 @@ jobs:
       - run: dotnet restore SIRK-Updater.sln
       - run: dotnet build SIRK-Updater.sln --configuration Release --no-restore
 
+  powershell-contracts:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse installers
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($file in @('install.ps1', 'install-release.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD $file), [ref]$tokens, [ref]$errors)
+            if ($errors.Count -ne 0) { throw ($errors | ForEach-Object Message | Out-String) }
+          }
+      - name: Release installer contract
+        shell: powershell
+        run: .\tests\install-release-contract.ps1
+
   publish-windows:
     runs-on: windows-latest
     steps:
