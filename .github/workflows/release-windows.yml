@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'src/**'
+      - 'Directory.Build.props'
       - 'install.ps1'
       - 'install-release.ps1'
       - '.github/workflows/release-windows.yml'
@@ -23,15 +24,15 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Publish service
         shell: pwsh
         run: |
           dotnet restore src/SirkUpdater.Service/SirkUpdater.Service.csproj -r win-x64
           dotnet publish src/SirkUpdater.Service/SirkUpdater.Service.csproj `
-            -c Release -r win-x64 --self-contained true --no-restore `
-            -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false `
+            -c Release -r win-x64 --self-contained false --no-restore `
+            -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false `
             -o publish/service
 
       - name: Publish CLI
@@ -39,8 +40,8 @@ jobs:
         run: |
           dotnet restore src/SirkUpdater.Cli/SirkUpdater.Cli.csproj -r win-x64
           dotnet publish src/SirkUpdater.Cli/SirkUpdater.Cli.csproj `
-            -c Release -r win-x64 --self-contained true --no-restore `
-            -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false `
+            -c Release -r win-x64 --self-contained false --no-restore `
+            -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false `
             -o publish/cli
 
       - name: Build release package
@@ -50,18 +51,36 @@ jobs:
           New-Item -ItemType Directory -Path $payload -Force | Out-Null
 
           Copy-Item 'publish/service/*' $payload -Recurse -Force
+          Copy-Item 'publish/cli/*' $payload -Recurse -Force
 
-          $cli = Get-ChildItem 'publish/cli' -Filter '*.exe' -File |
-            Where-Object Name -ne 'SirkUpdater.Service.exe' |
-            Select-Object -First 1
-          if (-not $cli) { throw 'Published CLI executable not found.' }
-          Copy-Item $cli.FullName (Join-Path $payload 'SirkUpdater.exe') -Force
+          $cliAppHost = Join-Path $payload 'SirkUpdater.Cli.exe'
+          if (-not (Test-Path $cliAppHost)) {
+            throw 'Published CLI application host not found.'
+          }
+          Move-Item $cliAppHost (Join-Path $payload 'SirkUpdater.exe') -Force
+
+          foreach ($required in @(
+            'SirkUpdater.Service.exe',
+            'SirkUpdater.Service.dll',
+            'SirkUpdater.Service.runtimeconfig.json',
+            'SirkUpdater.exe',
+            'SirkUpdater.Cli.dll',
+            'SirkUpdater.Cli.runtimeconfig.json',
+            'SirkUpdater.Core.dll'
+          )) {
+            if (-not (Test-Path (Join-Path $payload $required))) {
+              throw "Release payload is missing: $required"
+            }
+          }
 
           @{
             schemaVersion = 1
             applicationId = 'sirk-updater'
             version = $env:VERSION
             architecture = 'win-x64'
+            deploymentMode = 'framework-dependent'
+            targetFramework = 'net10.0'
+            requiredRuntime = 'Microsoft.NETCore.App 10.0'
             commit = '${{ github.sha }}'
           } | ConvertTo-Json -Depth 5 |
             Set-Content (Join-Path $payload 'release-manifest.json') -Encoding UTF8
@@ -72,6 +91,12 @@ jobs:
 
           $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $zipName" | Set-Content "$zipPath.sha256" -Encoding ASCII
+
+          $sizeMb = [Math]::Round((Get-Item $zipPath).Length / 1MB, 2)
+          if ($sizeMb -gt 15) {
+            throw "Framework-dependent package is unexpectedly large: $sizeMb MB"
+          }
+          Write-Host "Release package size: $sizeMb MB"
 
           "ZIP_NAME=$zipName" | Out-File $env:GITHUB_ENV -Append
           "TAG_NAME=v$env:VERSION" | Out-File $env:GITHUB_ENV -Append
