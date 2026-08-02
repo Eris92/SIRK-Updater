@@ -1,0 +1,88 @@
+name: SIRK Updater Windows Release
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'install.ps1'
+      - 'install-release.ps1'
+      - '.github/workflows/release-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    env:
+      VERSION: 0.1.0-dev.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Publish service
+        shell: pwsh
+        run: |
+          dotnet restore src/SirkUpdater.Service/SirkUpdater.Service.csproj -r win-x64
+          dotnet publish src/SirkUpdater.Service/SirkUpdater.Service.csproj `
+            -c Release -r win-x64 --self-contained true --no-restore `
+            -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false `
+            -o publish/service
+
+      - name: Publish CLI
+        shell: pwsh
+        run: |
+          dotnet restore src/SirkUpdater.Cli/SirkUpdater.Cli.csproj -r win-x64
+          dotnet publish src/SirkUpdater.Cli/SirkUpdater.Cli.csproj `
+            -c Release -r win-x64 --self-contained true --no-restore `
+            -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false `
+            -o publish/cli
+
+      - name: Build release package
+        shell: pwsh
+        run: |
+          $payload = Join-Path $PWD 'publish/payload'
+          New-Item -ItemType Directory -Path $payload -Force | Out-Null
+
+          Copy-Item 'publish/service/*' $payload -Recurse -Force
+
+          $cli = Get-ChildItem 'publish/cli' -Filter '*.exe' -File |
+            Where-Object Name -ne 'SirkUpdater.Service.exe' |
+            Select-Object -First 1
+          if (-not $cli) { throw 'Published CLI executable not found.' }
+          Copy-Item $cli.FullName (Join-Path $payload 'SirkUpdater.exe') -Force
+
+          @{
+            schemaVersion = 1
+            applicationId = 'sirk-updater'
+            version = $env:VERSION
+            architecture = 'win-x64'
+            commit = '${{ github.sha }}'
+          } | ConvertTo-Json -Depth 5 |
+            Set-Content (Join-Path $payload 'release-manifest.json') -Encoding UTF8
+
+          $zipName = "SIRK-Updater-$env:VERSION-win-x64.zip"
+          $zipPath = Join-Path $PWD $zipName
+          Compress-Archive -Path "$payload/*" -DestinationPath $zipPath -CompressionLevel Optimal
+
+          $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $zipName" | Set-Content "$zipPath.sha256" -Encoding ASCII
+
+          "ZIP_NAME=$zipName" | Out-File $env:GITHUB_ENV -Append
+          "TAG_NAME=v$env:VERSION" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: SIRK Updater ${{ env.VERSION }}
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            ${{ env.ZIP_NAME }}
+            ${{ env.ZIP_NAME }}.sha256
