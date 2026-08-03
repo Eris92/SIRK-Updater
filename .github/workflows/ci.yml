@@ -1,6 +1,89 @@
 name: CI
 
 on:
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-hardening:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/strict-tls-and-health-uri
+      - name: Apply strict TLS changes and restore CI
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path('src/SirkUpdater.Core/TransactionalUpdateEngine.cs')
+          text = source.read_text(encoding='utf-8')
+          unsafe = '''        handler ??= new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+        };
+        _http = new HttpClient(handler, disposeHandler: true);'''
+          safe = '''        // Production uses the operating-system trust store and validates both
+        // the certificate chain and the requested host name. Tests may inject an
+        // explicit handler, but production never disables certificate validation.
+        handler ??= new HttpClientHandler();
+        _http = new HttpClient(handler, disposeHandler: true);'''
+          if text.count(unsafe) != 1:
+              raise SystemExit('Unsafe TLS handler was not found exactly once.')
+          text = text.replace(unsafe, safe)
+          marker = '''        var deadline = DateTimeOffset.UtcNow + timeout;
+        Exception? last = null;'''
+          replacement = '''        var healthUri = ValidateHealthUri(manifest.HealthUrl);
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        Exception? last = null;'''
+          if text.count(marker) != 1:
+              raise SystemExit('Health-loop marker was not found exactly once.')
+          text = text.replace(marker, replacement)
+          request = '                using var response = await _http.GetAsync(manifest.HealthUrl, cancellationToken);'
+          if text.count(request) != 1:
+              raise SystemExit('Health request marker was not found exactly once.')
+          text = text.replace(request, '                using var response = await _http.GetAsync(healthUri, cancellationToken);')
+          insertion = '''    private static string ResolvePayloadRoot(string stagingRoot)
+    {'''
+          helper = '''    internal static Uri ValidateHealthUri(string value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+            throw new InvalidDataException("Application health URL must be an absolute URI.");
+        if (uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)) return uri;
+        if (uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) && IsLoopbackHost(uri.Host)) return uri;
+        throw new InvalidDataException("Application health URL must use HTTPS unless it targets localhost or a loopback address.");
+    }
+
+    private static bool IsLoopbackHost(string host)
+    {
+        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return true;
+        return IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address);
+    }
+
+''' + insertion
+          if text.count(insertion) != 1:
+              raise SystemExit('Health URI helper insertion point is missing.')
+          source.write_text(text.replace(insertion, helper), encoding='utf-8', newline='\n')
+
+          Path('tests/tls-security-contract.ps1').write_text(r'''#requires -Version 7.4
+$ErrorActionPreference = 'Stop'
+$source = Get-Content 'src/SirkUpdater.Core/TransactionalUpdateEngine.cs' -Raw
+foreach ($forbidden in @('DangerousAcceptAnyServerCertificateValidator','ServerCertificateCustomValidationCallback','RemoteCertificateValidationCallback')) {
+  if ($source.Contains($forbidden, [StringComparison]::Ordinal)) { throw "Forbidden TLS bypass remains: $forbidden" }
+}
+foreach ($required in @('handler ??= new HttpClientHandler()','ValidateHealthUri(manifest.HealthUrl)','Application health URL must use HTTPS unless it targets localhost or a loopback address','IPAddress.IsLoopback')) {
+  if (-not $source.Contains($required, [StringComparison]::Ordinal)) { throw "Strict TLS/health URI contract is missing: $required" }
+}
+Write-Host 'tls-security-contract: OK'
+''', encoding='utf-8', newline='\n')
+
+          final_ci = r'''name: CI
+
+on:
   push:
     branches: [main, develop]
   pull_request:
@@ -36,19 +119,14 @@ jobs:
             'install-release-v2.ps1',
             'tests/install-release-contract.ps1',
             'tests/delegated-signature-contract.ps1',
+            'tests/tls-security-contract.ps1',
             'test/release-package-contract.ps1'
           )) {
             if (-not (Test-Path -LiteralPath $file)) { throw "Missing contract file: $file" }
             $tokens = $null
             $errors = $null
-            [void][System.Management.Automation.Language.Parser]::ParseFile(
-              (Join-Path $PWD $file),
-              [ref]$tokens,
-              [ref]$errors
-            )
-            if ($errors.Count -ne 0) {
-              throw ($errors | ForEach-Object Message | Out-String)
-            }
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD $file),[ref]$tokens,[ref]$errors)
+            if ($errors.Count -ne 0) { throw ($errors | ForEach-Object Message | Out-String) }
           }
           if (Test-Path install.ps1) { throw 'Legacy source installer is forbidden.' }
           if (Test-Path install-release.ps1) { throw 'Legacy release installer is forbidden.' }
@@ -58,6 +136,9 @@ jobs:
       - name: Delegated signature verification contract
         shell: pwsh
         run: ./tests/delegated-signature-contract.ps1
+      - name: Strict TLS and health URI contract
+        shell: pwsh
+        run: ./tests/tls-security-contract.ps1
 
   release-package-contract:
     runs-on: windows-latest
@@ -66,7 +147,6 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-
       - name: Publish framework-dependent binaries
         shell: pwsh
         run: |
@@ -74,12 +154,10 @@ jobs:
             -c Release -r win-x64 --self-contained false `
             -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false `
             -o publish/service
-
           dotnet publish src/SirkUpdater.Cli/SirkUpdater.Cli.csproj `
             -c Release -r win-x64 --self-contained false `
             -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false `
             -o publish/cli
-
       - name: Assemble package
         shell: pwsh
         run: |
@@ -87,11 +165,9 @@ jobs:
           New-Item -ItemType Directory -Path $payload -Force | Out-Null
           Copy-Item 'publish/service/*' $payload -Recurse -Force
           Copy-Item 'publish/cli/*' $payload -Recurse -Force
-
           $cli = Join-Path $payload 'SirkUpdater.Cli.exe'
           if (-not (Test-Path $cli)) { throw 'CLI apphost missing.' }
           Move-Item $cli (Join-Path $payload 'SirkUpdater.exe') -Force
-
           @{
             schemaVersion = 1
             applicationId = 'sirk-updater'
@@ -101,14 +177,8 @@ jobs:
             targetFramework = 'net10.0'
             requiredRuntime = 'Microsoft.NETCore.App 10.0'
             commit = '${{ github.sha }}'
-          } | ConvertTo-Json -Depth 5 |
-            Set-Content (Join-Path $payload 'release-manifest.json') -Encoding UTF8
-
-          Compress-Archive `
-            -Path "$payload/*" `
-            -DestinationPath 'SIRK-Updater-ci-win-x64.zip' `
-            -CompressionLevel Optimal
-
+          } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $payload 'release-manifest.json') -Encoding UTF8
+          Compress-Archive -Path "$payload/*" -DestinationPath 'SIRK-Updater-ci-win-x64.zip' -CompressionLevel Optimal
       - name: Validate compact release contract
         shell: pwsh
         run: |
@@ -116,8 +186,18 @@ jobs:
             -ServicePublish ./publish/service `
             -CliPublish ./publish/cli `
             -PackagePath ./SIRK-Updater-ci-win-x64.zip
-
       - uses: actions/upload-artifact@v4
         with:
           name: sirk-updater-win-x64
           path: SIRK-Updater-ci-win-x64.zip
+'''
+          Path('.github/workflows/ci.yml').write_text(final_ci, encoding='utf-8', newline='\n')
+          for temporary in ('.github/workflows/apply-strict-tls.yml', '.github/workflows/apply-strict-tls-pr.yml'):
+              Path(temporary).unlink(missing_ok=True)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'Enforce strict TLS validation in updater'
+          git push origin HEAD:fix/strict-tls-and-health-uri
