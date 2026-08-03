@@ -17,6 +17,7 @@ jobs:
       - name: Apply source and CI changes
         shell: bash
         run: |
+          # Triggered after the PR exists so GitHub evaluates this workflow.
           python3 - <<'PY'
           from pathlib import Path
           path=Path('src/SirkUpdater.Core/TransactionalUpdateEngine.cs')
