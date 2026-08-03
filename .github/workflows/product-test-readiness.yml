@@ -60,6 +60,7 @@ jobs:
           dotnet test SIRK-Updater.sln -c Release --no-build
           ./tests/install-release-contract.ps1
           ./tests/delegated-signature-contract.ps1
+          ./tests/tls-security-contract.ps1
 
       - name: Publish framework-dependent payload
         shell: pwsh

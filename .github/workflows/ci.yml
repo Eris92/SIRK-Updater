@@ -36,6 +36,7 @@ jobs:
             'install-release-v2.ps1',
             'tests/install-release-contract.ps1',
             'tests/delegated-signature-contract.ps1',
+            'tests/tls-security-contract.ps1',
             'test/release-package-contract.ps1'
           )) {
             if (-not (Test-Path -LiteralPath $file)) { throw "Missing contract file: $file" }
@@ -58,6 +59,9 @@ jobs:
       - name: Delegated signature verification contract
         shell: pwsh
         run: ./tests/delegated-signature-contract.ps1
+      - name: Strict TLS and health URI contract
+        shell: pwsh
+        run: ./tests/tls-security-contract.ps1
 
   release-package-contract:
     runs-on: windows-latest

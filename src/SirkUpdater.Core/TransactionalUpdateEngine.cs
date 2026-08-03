@@ -23,10 +23,7 @@ public sealed class TransactionalUpdateEngine
         _root = Path.GetFullPath(root ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "SIRK", "Updater"));
-        handler ??= new HttpClientHandler
-        {
-            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-        };
+        handler ??= new HttpClientHandler();
         _http = new HttpClient(handler, disposeHandler: true);
     }
 
@@ -224,6 +221,7 @@ public sealed class TransactionalUpdateEngine
             await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
             return;
         }
+        var healthUri = ValidateHealthUri(manifest.HealthUrl);
         var deadline = DateTimeOffset.UtcNow + timeout;
         Exception? last = null;
         while (DateTimeOffset.UtcNow < deadline)
@@ -231,7 +229,7 @@ public sealed class TransactionalUpdateEngine
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                using var response = await _http.GetAsync(manifest.HealthUrl, cancellationToken);
+                using var response = await _http.GetAsync(healthUri, cancellationToken);
                 if (response.StatusCode is >= HttpStatusCode.OK and < HttpStatusCode.BadRequest) return;
                 last = new HttpRequestException($"Health endpoint returned HTTP {(int)response.StatusCode}.");
             }
@@ -242,6 +240,21 @@ public sealed class TransactionalUpdateEngine
             await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
         }
         throw new TimeoutException("Application health check timed out.", last);
+    }
+
+    internal static Uri ValidateHealthUri(string value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+            throw new InvalidDataException("Application health URL must be an absolute URI.");
+        if (uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)) return uri;
+        if (uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) && IsLoopbackHost(uri.Host)) return uri;
+        throw new InvalidDataException("Application health URL must use HTTPS unless it targets localhost or a loopback address.");
+    }
+
+    private static bool IsLoopbackHost(string host)
+    {
+        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return true;
+        return IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address);
     }
 
     private static string ResolvePayloadRoot(string stagingRoot)
