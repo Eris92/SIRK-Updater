@@ -1,15 +1,15 @@
 # Full product audit
 
 Repository: `Eris92/SIRK-Updater`
-Commit: `a0df8f29dfd2e421603d4446e6d473d71b8a573b`
+Commit: `70099fca0ea59c9796c588ef0c32f821c2847286`
 
 ## Summary
 
 ```json
 {
-  "files": 25,
-  "textFiles": 24,
-  "lines": 1695,
+  "files": 26,
+  "textFiles": 25,
+  "lines": 1727,
   "extensions": {
     ".cs": 7,
     ".csproj": 3,
@@ -19,7 +19,7 @@ Commit: `a0df8f29dfd2e421603d4446e6d473d71b8a573b`
     ".ps1": 4,
     ".psm1": 1,
     ".sln": 1,
-    ".yml": 4
+    ".yml": 5
   },
   "projects": 3,
   "nodeArtifacts": 0,
