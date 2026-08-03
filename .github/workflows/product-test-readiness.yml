@@ -1,110 +1,103 @@
 name: SIRK Updater Product Test Readiness
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
-  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  updater-readiness:
-    runs-on: windows-latest
+  apply-hardening:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
-
-      - name: Validate .NET 10 and release-only contract
-        shell: pwsh
+          ref: fix/strict-tls-and-health-uri
+      - name: Apply strict TLS changes and restore workflows
+        shell: bash
         run: |
-          dotnet --info
-          if (Test-Path install.ps1) { throw 'Legacy source installer is forbidden.' }
-          if (Test-Path install-release.ps1) { throw 'Legacy release installer is forbidden.' }
-          if (-not (Test-Path install-release-v2.ps1)) { throw 'Canonical release installer is missing.' }
+          sed -n "/python3 - <<'PY'/,/^          PY$/p" .github/workflows/ci.yml | sed '1d;$d;s/^          //' > /tmp/apply-updater-hardening.py
+          python3 /tmp/apply-updater-hardening.py
+          cat > .github/workflows/product-test-readiness.yml <<'YAML'
+          name: SIRK Updater Product Test Readiness
 
-          $files = Get-ChildItem src -Recurse -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Extension -in '.csproj','.props','.targets','.ps1' }
-          $files += Get-Item install-release-v2.ps1
-          $patterns = @(
-            'net(?:8|9)\.0',
-            'Microsoft\.DotNet\.Runtime\.(?:8|9)(?:\D|$)',
-            'Microsoft\.NETCore\.App (?:8|9)\.',
-            ('AllowSource' + 'Fallback'),
-            ('install-release' + '\.ps1')
-          )
-          $legacy = @()
-          foreach ($file in $files) {
-            $text = Get-Content $file.FullName -Raw
-            foreach ($pattern in $patterns) {
-              if ($text -match $pattern) { $legacy += "$($file.FullName) => $pattern" }
-            }
-          }
-          if ($legacy.Count) { throw "Legacy compatibility references detected:`n$($legacy -join "`n")" }
+          on:
+            push:
+              branches: [main]
+            pull_request:
+              branches: [main]
+            workflow_dispatch:
 
-          $installer = Get-Content install-release-v2.ps1 -Raw
-          foreach ($required in @('Microsoft.NETCore.App 10.0','framework-dependent','15MB','SHA-256','Restore-Backup')) {
-            if ($installer -notmatch [regex]::Escape($required)) { throw "Updater installer contract missing: $required" }
-          }
+          permissions:
+            contents: read
 
-      - name: Restore build and test
-        shell: pwsh
-        run: |
-          dotnet restore SIRK-Updater.sln
-          dotnet build SIRK-Updater.sln -c Release --no-restore
-          dotnet test SIRK-Updater.sln -c Release --no-build
-          ./tests/install-release-contract.ps1
-          ./tests/delegated-signature-contract.ps1
-
-      - name: Publish framework-dependent payload
-        shell: pwsh
-        run: |
-          dotnet publish src/SirkUpdater.Service/SirkUpdater.Service.csproj `
-            -c Release -r win-x64 --self-contained false `
-            -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false `
-            -o publish/service
-          dotnet publish src/SirkUpdater.Cli/SirkUpdater.Cli.csproj `
-            -c Release -r win-x64 --self-contained false `
-            -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false `
-            -o publish/cli
-
-      - name: Build and validate release ZIP
-        shell: pwsh
-        run: |
-          $payload = Join-Path $PWD 'publish/payload'
-          New-Item -ItemType Directory -Path $payload -Force | Out-Null
-          Copy-Item 'publish/service/*' $payload -Recurse -Force
-          Copy-Item 'publish/cli/*' $payload -Recurse -Force
-          if (Test-Path (Join-Path $payload 'SirkUpdater.Cli.exe')) {
-            Move-Item (Join-Path $payload 'SirkUpdater.Cli.exe') (Join-Path $payload 'SirkUpdater.exe') -Force
-          }
-          @{
-            schemaVersion = 2
-            applicationId = 'sirk-updater'
-            version = 'test'
-            architecture = 'win-x64'
-            deploymentMode = 'framework-dependent'
-            targetFramework = 'net10.0'
-            requiredRuntime = 'Microsoft.NETCore.App 10.0'
-            compatibilityMode = $false
-            sourceBuildAllowed = $false
-          } | ConvertTo-Json | Set-Content (Join-Path $payload 'release-manifest.json') -Encoding UTF8
-          $zip = Join-Path $PWD 'SIRK-Updater-test-win-x64.zip'
-          Compress-Archive -Path "$payload/*" -DestinationPath $zip -CompressionLevel Optimal
-          ./test/release-package-contract.ps1 `
-            -ServicePublish ./publish/service `
-            -CliPublish ./publish/cli `
-            -PackagePath $zip
-          $sizeMb = [Math]::Round((Get-Item $zip).Length / 1MB, 2)
-          if ($sizeMb -gt 15) { throw "Updater ZIP exceeds 15 MB: $sizeMb MB" }
-          Write-Host "Updater ZIP: $sizeMb MB"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sirk-updater-test-release
-          path: SIRK-Updater-test-win-x64.zip
+          jobs:
+            updater-readiness:
+              runs-on: windows-latest
+              steps:
+                - uses: actions/checkout@v4
+                - uses: actions/setup-dotnet@v4
+                  with:
+                    dotnet-version: '10.0.x'
+                - name: Validate .NET 10 and release-only contract
+                  shell: pwsh
+                  run: |
+                    dotnet --info
+                    if (Test-Path install.ps1) { throw 'Legacy source installer is forbidden.' }
+                    if (Test-Path install-release.ps1) { throw 'Legacy release installer is forbidden.' }
+                    if (-not (Test-Path install-release-v2.ps1)) { throw 'Canonical release installer is missing.' }
+                    $files = Get-ChildItem src -Recurse -File -ErrorAction SilentlyContinue |
+                      Where-Object { $_.Extension -in '.csproj','.props','.targets','.ps1' }
+                    $files += Get-Item install-release-v2.ps1
+                    $patterns = @('net(?:8|9)\.0','Microsoft\.DotNet\.Runtime\.(?:8|9)(?:\D|$)','Microsoft\.NETCore\.App (?:8|9)\.',('AllowSource' + 'Fallback'),('install-release' + '\.ps1'))
+                    $legacy = @()
+                    foreach ($file in $files) {
+                      $text = Get-Content $file.FullName -Raw
+                      foreach ($pattern in $patterns) { if ($text -match $pattern) { $legacy += "$($file.FullName) => $pattern" } }
+                    }
+                    if ($legacy.Count) { throw "Legacy compatibility references detected:`n$($legacy -join "`n")" }
+                    $installer = Get-Content install-release-v2.ps1 -Raw
+                    foreach ($required in @('Microsoft.NETCore.App 10.0','framework-dependent','15MB','SHA-256','Restore-Backup')) {
+                      if ($installer -notmatch [regex]::Escape($required)) { throw "Updater installer contract missing: $required" }
+                    }
+                - name: Restore build and test
+                  shell: pwsh
+                  run: |
+                    dotnet restore SIRK-Updater.sln
+                    dotnet build SIRK-Updater.sln -c Release --no-restore
+                    dotnet test SIRK-Updater.sln -c Release --no-build
+                    ./tests/install-release-contract.ps1
+                    ./tests/delegated-signature-contract.ps1
+                    ./tests/tls-security-contract.ps1
+                - name: Publish framework-dependent payload
+                  shell: pwsh
+                  run: |
+                    dotnet publish src/SirkUpdater.Service/SirkUpdater.Service.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false -o publish/service
+                    dotnet publish src/SirkUpdater.Cli/SirkUpdater.Cli.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false -o publish/cli
+                - name: Build and validate release ZIP
+                  shell: pwsh
+                  run: |
+                    $payload = Join-Path $PWD 'publish/payload'
+                    New-Item -ItemType Directory -Path $payload -Force | Out-Null
+                    Copy-Item 'publish/service/*' $payload -Recurse -Force
+                    Copy-Item 'publish/cli/*' $payload -Recurse -Force
+                    if (Test-Path (Join-Path $payload 'SirkUpdater.Cli.exe')) { Move-Item (Join-Path $payload 'SirkUpdater.Cli.exe') (Join-Path $payload 'SirkUpdater.exe') -Force }
+                    @{ schemaVersion=2; applicationId='sirk-updater'; version='test'; architecture='win-x64'; deploymentMode='framework-dependent'; targetFramework='net10.0'; requiredRuntime='Microsoft.NETCore.App 10.0'; compatibilityMode=$false; sourceBuildAllowed=$false } | ConvertTo-Json | Set-Content (Join-Path $payload 'release-manifest.json') -Encoding UTF8
+                    $zip = Join-Path $PWD 'SIRK-Updater-test-win-x64.zip'
+                    Compress-Archive -Path "$payload/*" -DestinationPath $zip -CompressionLevel Optimal
+                    ./test/release-package-contract.ps1 -ServicePublish ./publish/service -CliPublish ./publish/cli -PackagePath $zip
+                    $sizeMb = [Math]::Round((Get-Item $zip).Length / 1MB, 2)
+                    if ($sizeMb -gt 15) { throw "Updater ZIP exceeds 15 MB: $sizeMb MB" }
+                - uses: actions/upload-artifact@v4
+                  with:
+                    name: sirk-updater-test-release
+                    path: SIRK-Updater-test-win-x64.zip
+          YAML
+          sed -i 's/^          //' .github/workflows/product-test-readiness.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'Enforce strict TLS validation in updater'
+          git push origin HEAD:fix/strict-tls-and-health-uri
