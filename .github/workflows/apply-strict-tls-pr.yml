@@ -1,0 +1,106 @@
+name: Apply Strict TLS Hardening PR
+
+on:
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/strict-tls-and-health-uri
+      - name: Apply source and CI changes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path=Path('src/SirkUpdater.Core/TransactionalUpdateEngine.cs')
+          text=path.read_text(encoding='utf-8')
+          old='''        handler ??= new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+        };
+        _http = new HttpClient(handler, disposeHandler: true);'''
+          new='''        // The default handler uses the operating system trust store and validates
+        // both the certificate chain and the requested host name. Tests may still
+        // inject an explicit handler, but production never disables TLS validation.
+        handler ??= new HttpClientHandler();
+        _http = new HttpClient(handler, disposeHandler: true);'''
+          if text.count(old)!=1: raise SystemExit('Unsafe handler block was not found exactly once.')
+          text=text.replace(old,new)
+          old2='''        var deadline = DateTimeOffset.UtcNow + timeout;
+        Exception? last = null;'''
+          new2='''        var healthUri = ValidateHealthUri(manifest.HealthUrl);
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        Exception? last = null;'''
+          if text.count(old2)!=1: raise SystemExit('Health loop marker was not found exactly once.')
+          text=text.replace(old2,new2)
+          old3='''                using var response = await _http.GetAsync(manifest.HealthUrl, cancellationToken);'''
+          new3='''                using var response = await _http.GetAsync(healthUri, cancellationToken);'''
+          if text.count(old3)!=1: raise SystemExit('Health request marker was not found exactly once.')
+          text=text.replace(old3,new3)
+          marker='''    private static string ResolvePayloadRoot(string stagingRoot)
+    {'''
+          helper='''    internal static Uri ValidateHealthUri(string value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
+            throw new InvalidDataException("Application health URL must be an absolute URI.");
+        if (uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)) return uri;
+        if (uri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) && IsLoopbackHost(uri.Host)) return uri;
+        throw new InvalidDataException("Application health URL must use HTTPS unless it targets localhost or a loopback address.");
+    }
+
+    private static bool IsLoopbackHost(string host)
+    {
+        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return true;
+        return IPAddress.TryParse(host, out var address) && IPAddress.IsLoopback(address);
+    }
+
+'''+marker
+          if text.count(marker)!=1: raise SystemExit('Helper insertion marker was not found exactly once.')
+          path.write_text(text.replace(marker,helper),encoding='utf-8',newline='\n')
+
+          Path('tests/tls-security-contract.ps1').write_text(r'''#requires -Version 7.4
+$ErrorActionPreference = 'Stop'
+$source = Get-Content 'src/SirkUpdater.Core/TransactionalUpdateEngine.cs' -Raw
+foreach ($forbidden in @('DangerousAcceptAnyServerCertificateValidator','ServerCertificateCustomValidationCallback','RemoteCertificateValidationCallback')) {
+  if ($source.Contains($forbidden, [StringComparison]::Ordinal)) { throw "Forbidden TLS bypass remains: $forbidden" }
+}
+foreach ($required in @('handler ??= new HttpClientHandler()','ValidateHealthUri(manifest.HealthUrl)','Application health URL must use HTTPS unless it targets localhost or a loopback address','IPAddress.IsLoopback')) {
+  if (-not $source.Contains($required, [StringComparison]::Ordinal)) { throw "Strict TLS/health URI contract is missing: $required" }
+}
+Write-Host 'tls-security-contract: OK'
+''',encoding='utf-8',newline='\n')
+
+          ci=Path('.github/workflows/ci.yml')
+          value=ci.read_text(encoding='utf-8')
+          old="""            'tests/delegated-signature-contract.ps1',
+            'test/release-package-contract.ps1'"""
+          new="""            'tests/delegated-signature-contract.ps1',
+            'tests/tls-security-contract.ps1',
+            'test/release-package-contract.ps1'"""
+          if value.count(old)!=1: raise SystemExit('CI parse-list marker missing.')
+          value=value.replace(old,new)
+          marker2="""      - name: Delegated signature verification contract
+        shell: pwsh
+        run: ./tests/delegated-signature-contract.ps1
+"""
+          replacement=marker2+"""      - name: Strict TLS and health URI contract
+        shell: pwsh
+        run: ./tests/tls-security-contract.ps1
+"""
+          if value.count(marker2)!=1: raise SystemExit('CI step marker missing.')
+          ci.write_text(value.replace(marker2,replacement),encoding='utf-8',newline='\n')
+          PY
+          rm -f .github/workflows/apply-strict-tls.yml .github/workflows/apply-strict-tls-pr.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'Enforce strict TLS validation in updater'
+          git push origin HEAD:fix/strict-tls-and-health-uri
