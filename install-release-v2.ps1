@@ -30,8 +30,28 @@ function Write-Log {
     Write-Host "[$Level] $Message" -ForegroundColor $Color
 }
 
+function Get-GitHubApiHeaders {
+    $headers = @{
+        'User-Agent' = 'SIRK-Updater-Installer-v2'
+        'Accept' = 'application/vnd.github+json'
+        'X-GitHub-Api-Version' = '2022-11-28'
+    }
+
+    $token = if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
+        $env:GITHUB_TOKEN.Trim()
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
+        $env:GH_TOKEN.Trim()
+    }
+    else {
+        ''
+    }
+    if ($token) { $headers.Authorization = "Bearer $token" }
+    return $headers
+}
+
 function Get-ReleaseMetadata {
-    $headers = @{ 'User-Agent' = 'SIRK-Updater-Installer-v2' }
+    $headers = Get-GitHubApiHeaders
     if ($Version) {
         $tag = if ($Version.StartsWith('v')) { $Version } else { "v$Version" }
         return Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/Eris92/SIRK-Updater/releases/tags/$tag"
