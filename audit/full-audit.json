@@ -1,0 +1,325 @@
+{
+  "repository": "Eris92/SIRK-Updater",
+  "commit": "70099fca0ea59c9796c588ef0c32f821c2847286",
+  "summary": {
+    "files": 26,
+    "textFiles": 25,
+    "lines": 1727,
+    "extensions": {
+      ".cs": 7,
+      ".csproj": 3,
+      ".json": 3,
+      ".md": 1,
+      ".props": 1,
+      ".ps1": 4,
+      ".psm1": 1,
+      ".sln": 1,
+      ".yml": 5
+    },
+    "projects": 3,
+    "nodeArtifacts": 0,
+    "legacyPaths": 0,
+    "findingsBySeverity": {
+      "critical": 1,
+      "high": 0,
+      "medium": 1,
+      "low": 0,
+      "info": 1
+    }
+  },
+  "projects": [
+    {
+      "path": "src/SirkUpdater.Cli/SirkUpdater.Cli.csproj",
+      "frameworks": [],
+      "packages": []
+    },
+    {
+      "path": "src/SirkUpdater.Core/SirkUpdater.Core.csproj",
+      "frameworks": [],
+      "packages": []
+    },
+    {
+      "path": "src/SirkUpdater.Service/SirkUpdater.Service.csproj",
+      "frameworks": [],
+      "packages": [
+        {
+          "name": "Microsoft.Extensions.Hosting.WindowsServices",
+          "version": "10.0.0"
+        }
+      ]
+    }
+  ],
+  "nodeArtifacts": [],
+  "legacyPaths": [],
+  "jsonConfigurationKeys": {},
+  "configurationTypes": [],
+  "endpoints": [],
+  "integrations": {
+    "central": [
+      {
+        "path": "README.md",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/full-product-audit-pr.yml",
+        "count": 1
+      }
+    ],
+    "portal": [
+      {
+        "path": "examples/sirk-portal.windows.json",
+        "count": 7
+      },
+      {
+        "path": "README.md",
+        "count": 1
+      },
+      {
+        "path": "install-release-v2.ps1",
+        "count": 1
+      }
+    ],
+    "agent": [
+      {
+        "path": "install-release-v2.ps1",
+        "count": 2
+      },
+      {
+        "path": "README.md",
+        "count": 1
+      }
+    ],
+    "updater": [
+      {
+        "path": "install-release-v2.ps1",
+        "count": 29
+      },
+      {
+        "path": ".github/workflows/product-test-readiness.yml",
+        "count": 19
+      },
+      {
+        "path": ".github/workflows/release.yml",
+        "count": 16
+      },
+      {
+        "path": ".github/workflows/ci.yml",
+        "count": 14
+      },
+      {
+        "path": ".github/workflows/release-windows.yml",
+        "count": 13
+      },
+      {
+        "path": "test/release-package-contract.ps1",
+        "count": 11
+      },
+      {
+        "path": "SIRK-Updater.sln",
+        "count": 9
+      },
+      {
+        "path": "README.md",
+        "count": 8
+      },
+      {
+        "path": "src/SirkUpdater.Service/Program.cs",
+        "count": 7
+      },
+      {
+        "path": "src/SirkUpdater.Cli/Program.cs",
+        "count": 6
+      },
+      {
+        "path": "src/SirkUpdater.Core/TransactionalUpdateEngine.cs",
+        "count": 4
+      },
+      {
+        "path": "tests/install-release-contract.ps1",
+        "count": 3
+      },
+      {
+        "path": "src/SirkUpdater.Cli/SirkUpdater.Cli.csproj",
+        "count": 3
+      },
+      {
+        "path": "src/SirkUpdater.Service/SirkUpdater.Service.csproj",
+        "count": 3
+      },
+      {
+        "path": "schemas/application-manifest.schema.json",
+        "count": 2
+      },
+      {
+        "path": "tests/delegated-signature-contract.ps1",
+        "count": 2
+      },
+      {
+        "path": "src/SirkUpdater.Core/ApplicationRegistry.cs",
+        "count": 2
+      },
+      {
+        "path": "src/SirkUpdater.Core/UpdateRequest.cs",
+        "count": 2
+      },
+      {
+        "path": "src/SirkUpdater.Core/ApplicationManifest.cs",
+        "count": 1
+      },
+      {
+        "path": "src/SirkUpdater.Core/UpdateState.cs",
+        "count": 1
+      }
+    ],
+    "entra": [
+      {
+        "path": "README.md",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/full-product-audit-pr.yml",
+        "count": 1
+      }
+    ],
+    "openid": [],
+    "oidc": [],
+    "saml": [],
+    "ldap": [],
+    "active directory": [],
+    "jira": [],
+    "servicedesk": [],
+    "service desk": [],
+    "zabbix": [],
+    "wazuh": [],
+    "ticket": [],
+    "smtp": [],
+    "email": [
+      {
+        "path": ".github/workflows/full-product-audit-pr.yml",
+        "count": 1
+      }
+    ],
+    "webhook": [],
+    "remote desktop": [],
+    "rdp": [],
+    "backup": [
+      {
+        "path": "install-release-v2.ps1",
+        "count": 14
+      },
+      {
+        "path": "src/SirkUpdater.Core/TransactionalUpdateEngine.cs",
+        "count": 11
+      },
+      {
+        "path": "tests/delegated-signature-contract.ps1",
+        "count": 6
+      },
+      {
+        "path": "README.md",
+        "count": 1
+      },
+      {
+        "path": "tests/install-release-contract.ps1",
+        "count": 1
+      },
+      {
+        "path": ".github/workflows/product-test-readiness.yml",
+        "count": 1
+      }
+    ],
+    "restore": [
+      {
+        "path": ".github/workflows/product-test-readiness.yml",
+        "count": 4
+      },
+      {
+        "path": "install-release-v2.ps1",
+        "count": 3
+      },
+      {
+        "path": ".github/workflows/release.yml",
+        "count": 3
+      },
+      {
+        "path": ".github/workflows/ci.yml",
+        "count": 2
+      },
+      {
+        "path": ".github/workflows/release-windows.yml",
+        "count": 2
+      },
+      {
+        "path": "tests/install-release-contract.ps1",
+        "count": 1
+      }
+    ],
+    "yubikey": [],
+    "webauthn": [],
+    "fido": [],
+    "mfa": []
+  },
+  "workflows": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "name": "CI",
+      "has_pull_request": true,
+      "has_push": true,
+      "permissions_write": false
+    },
+    {
+      "path": ".github/workflows/full-product-audit-pr.yml",
+      "name": "Full Product Audit PR",
+      "has_pull_request": true,
+      "has_push": false,
+      "permissions_write": true
+    },
+    {
+      "path": ".github/workflows/release-windows.yml",
+      "name": "SIRK Updater Windows Release",
+      "has_pull_request": false,
+      "has_push": true,
+      "permissions_write": true
+    },
+    {
+      "path": ".github/workflows/product-test-readiness.yml",
+      "name": "SIRK Updater Product Test Readiness",
+      "has_pull_request": true,
+      "has_push": true,
+      "permissions_write": false
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "name": "Release",
+      "has_pull_request": false,
+      "has_push": true,
+      "permissions_write": true
+    }
+  ],
+  "findings": [
+    {
+      "severity": "critical",
+      "category": "tls",
+      "path": "src/SirkUpdater.Core/TransactionalUpdateEngine.cs",
+      "line": 28,
+      "rule": "accept-any-server-certificate",
+      "snippet": "ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator"
+    },
+    {
+      "severity": "medium",
+      "category": "incomplete",
+      "path": "src/SirkUpdater.Core/ApplicationManifest.cs",
+      "line": 75,
+      "rule": "incomplete-implementation",
+      "snippet": "throw new InvalidDataException(\"signatureVerifierArguments must include the {payload} placeholder.\");"
+    },
+    {
+      "severity": "info",
+      "category": "incomplete",
+      "path": "tests/delegated-signature-contract.ps1",
+      "line": 13,
+      "rule": "incomplete-implementation",
+      "snippet": "'signatureVerifierArguments must include the {payload} placeholder'"
+    }
+  ]
+}
