@@ -11,12 +11,21 @@ public sealed class ApplicationRegistry
 
     public ApplicationRegistry(string? root = null)
     {
-        Root = Path.GetFullPath(root ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "SIRK", "Updater", "applications"));
+        Root = Path.GetFullPath(root ?? Path.Combine(PlatformDataRoot(), "applications"));
     }
 
     public string Root { get; }
+
+    internal static string PlatformDataRoot()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var common = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+            return Path.Combine(common, "SIRK", "Updater");
+        }
+
+        return "/var/lib/sirk-updater";
+    }
 
     public ApplicationManifest Register(ApplicationManifest manifest)
     {
