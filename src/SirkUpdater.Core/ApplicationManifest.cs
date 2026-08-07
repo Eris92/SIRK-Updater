@@ -4,6 +4,8 @@ namespace SirkUpdater.Core;
 
 public sealed record ApplicationManifest
 {
+    public const string CentralCacheSource = "sirk-central-cache";
+
     [JsonPropertyName("schemaVersion")]
     public int SchemaVersion { get; init; } = 1;
 
@@ -54,8 +56,9 @@ public sealed record ApplicationManifest
         if (string.IsNullOrWhiteSpace(ServiceName)) throw new InvalidDataException("serviceName is required.");
         if (!Path.IsPathFullyQualified(InstallRoot)) throw new InvalidDataException("installRoot must be absolute.");
         if (!Path.IsPathFullyQualified(DataRoot)) throw new InvalidDataException("dataRoot must be absolute.");
-        if (!Uri.TryCreate(UpdateSource, UriKind.Absolute, out var source) || source.Scheme != Uri.UriSchemeHttps)
-            throw new InvalidDataException("updateSource must be an absolute HTTPS URL.");
+        if (!string.Equals(UpdateSource, CentralCacheSource, StringComparison.Ordinal) &&
+            (!Uri.TryCreate(UpdateSource, UriKind.Absolute, out var source) || source.Scheme != Uri.UriSchemeHttps))
+            throw new InvalidDataException("updateSource must be sirk-central-cache or an absolute HTTPS URL.");
         if (HealthUrl is not null && (!Uri.TryCreate(HealthUrl, UriKind.Absolute, out var health) || health.Scheme is not ("http" or "https")))
             throw new InvalidDataException("healthUrl must be HTTP or HTTPS.");
 
