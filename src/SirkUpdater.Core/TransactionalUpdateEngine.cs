@@ -21,8 +21,11 @@ public sealed class TransactionalUpdateEngine
     {
         _registry = registry ?? new ApplicationRegistry();
         _root = Path.GetFullPath(root ?? ApplicationRegistry.PlatformDataRoot());
-        handler ??= new HttpClientHandler();
-        _http = new HttpClient(handler, disposeHandler: true);
+        handler ??= new HttpClientHandler { UseProxy = false };
+        _http = new HttpClient(handler, disposeHandler: true)
+        {
+            Timeout = Timeout.InfiniteTimeSpan
+        };
     }
 
     public async Task<UpdateState> ExecuteAsync(UpdateRequest request, CancellationToken cancellationToken = default)
@@ -219,23 +222,41 @@ public sealed class TransactionalUpdateEngine
             await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken);
             return;
         }
+
         var healthUri = ValidateHealthUri(manifest.HealthUrl);
         var deadline = DateTimeOffset.UtcNow + timeout;
         Exception? last = null;
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero) break;
+            var attemptTimeout = remaining < TimeSpan.FromSeconds(5)
+                ? remaining
+                : TimeSpan.FromSeconds(5);
+            using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            attempt.CancelAfter(attemptTimeout);
             try
             {
-                using var response = await _http.GetAsync(healthUri, cancellationToken);
+                using var response = await _http.GetAsync(healthUri, attempt.Token);
                 if (response.StatusCode is >= HttpStatusCode.OK and < HttpStatusCode.BadRequest) return;
                 last = new HttpRequestException($"Health endpoint returned HTTP {(int)response.StatusCode}.");
+            }
+            catch (OperationCanceledException error) when (!cancellationToken.IsCancellationRequested)
+            {
+                last = new TimeoutException(
+                    $"Health probe exceeded {attemptTimeout.TotalSeconds:0.#} seconds.",
+                    error);
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
                 last = error;
             }
-            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+
+            var delay = deadline - DateTimeOffset.UtcNow;
+            if (delay <= TimeSpan.Zero) break;
+            if (delay > TimeSpan.FromSeconds(2)) delay = TimeSpan.FromSeconds(2);
+            await Task.Delay(delay, cancellationToken);
         }
         throw new TimeoutException("Application health check timed out.", last);
     }
