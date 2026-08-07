@@ -66,7 +66,7 @@ static async Task<int> RunAsync(string[] args)
 
 static TimeSpan ResolveHealthTimeout()
 {
-    const int defaultSeconds = 120;
+    var defaultSeconds = OperatingSystem.IsLinux() ? 30 : 120;
     var raw = Environment.GetEnvironmentVariable("SIRK_UPDATER_HEALTH_TIMEOUT_SECONDS");
     if (string.IsNullOrWhiteSpace(raw)) return TimeSpan.FromSeconds(defaultSeconds);
     if (!int.TryParse(raw, out var seconds) || seconds is < 5 or > 600)
