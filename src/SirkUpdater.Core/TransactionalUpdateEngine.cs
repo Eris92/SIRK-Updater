@@ -20,9 +20,7 @@ public sealed class TransactionalUpdateEngine
     public TransactionalUpdateEngine(ApplicationRegistry? registry = null, string? root = null, HttpMessageHandler? handler = null)
     {
         _registry = registry ?? new ApplicationRegistry();
-        _root = Path.GetFullPath(root ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-            "SIRK", "Updater"));
+        _root = Path.GetFullPath(root ?? ApplicationRegistry.PlatformDataRoot());
         handler ??= new HttpClientHandler();
         _http = new HttpClient(handler, disposeHandler: true);
     }
@@ -266,29 +264,59 @@ public sealed class TransactionalUpdateEngine
 
     private static void StopService(string name, bool allowNotRunning)
     {
-        EnsureWindows();
-        var result = Run("sc.exe", ["stop", name]);
-        var output = result.Output;
-        if (result.ExitCode != 0 && !(allowNotRunning && (output.Contains("1062") || output.Contains("SERVICE_NOT_ACTIVE", StringComparison.OrdinalIgnoreCase))))
-            throw new InvalidOperationException($"Unable to stop service {name}: {output}");
-        if (result.ExitCode == 0) WaitService(name, "STOPPED", TimeSpan.FromMinutes(2));
+        if (OperatingSystem.IsWindows())
+        {
+            var result = Run("sc.exe", ["stop", name]);
+            var output = result.Output;
+            if (result.ExitCode != 0 && !(allowNotRunning && (output.Contains("1062") || output.Contains("SERVICE_NOT_ACTIVE", StringComparison.OrdinalIgnoreCase))))
+                throw new InvalidOperationException($"Unable to stop service {name}: {output}");
+            if (result.ExitCode == 0) WaitService(name, "stopped", TimeSpan.FromMinutes(2));
+            return;
+        }
+
+        EnsureSystemd();
+        var linux = Run("systemctl", ["stop", name]);
+        if (linux.ExitCode != 0)
+        {
+            var state = Run("systemctl", ["is-active", name]);
+            if (!(allowNotRunning && state.ExitCode == 3))
+                throw new InvalidOperationException($"Unable to stop service {name}: {linux.Output}");
+        }
+        WaitService(name, "stopped", TimeSpan.FromMinutes(2));
     }
 
     private static void StartService(string name, bool allowAlreadyRunning = false)
     {
-        EnsureWindows();
-        var result = Run("sc.exe", ["start", name]);
-        var output = result.Output;
-        if (result.ExitCode != 0 && !(allowAlreadyRunning && (output.Contains("1056") || output.Contains("ALREADY_RUNNING", StringComparison.OrdinalIgnoreCase))))
-            throw new InvalidOperationException($"Unable to start service {name}: {output}");
-        WaitService(name, "RUNNING", TimeSpan.FromMinutes(2));
+        if (OperatingSystem.IsWindows())
+        {
+            var result = Run("sc.exe", ["start", name]);
+            var output = result.Output;
+            if (result.ExitCode != 0 && !(allowAlreadyRunning && (output.Contains("1056") || output.Contains("ALREADY_RUNNING", StringComparison.OrdinalIgnoreCase))))
+                throw new InvalidOperationException($"Unable to start service {name}: {output}");
+            WaitService(name, "running", TimeSpan.FromMinutes(2));
+            return;
+        }
+
+        EnsureSystemd();
+        if (allowAlreadyRunning && Run("systemctl", ["is-active", "--quiet", name]).ExitCode == 0) return;
+        var linux = Run("systemctl", ["start", name]);
+        if (linux.ExitCode != 0)
+            throw new InvalidOperationException($"Unable to start service {name}: {linux.Output}");
+        WaitService(name, "running", TimeSpan.FromMinutes(2));
     }
 
     private static void ConfigureAutomatic(string name)
     {
-        EnsureWindows();
-        var result = Run("sc.exe", ["config", name, "start=", "auto"]);
-        if (result.ExitCode != 0) throw new InvalidOperationException($"Unable to configure service {name}: {result.Output}");
+        if (OperatingSystem.IsWindows())
+        {
+            var result = Run("sc.exe", ["config", name, "start=", "auto"]);
+            if (result.ExitCode != 0) throw new InvalidOperationException($"Unable to configure service {name}: {result.Output}");
+            return;
+        }
+
+        EnsureSystemd();
+        var linux = Run("systemctl", ["enable", name]);
+        if (linux.ExitCode != 0) throw new InvalidOperationException($"Unable to enable service {name}: {linux.Output}");
     }
 
     private static void TryConfigureAutomatic(string name)
@@ -299,11 +327,23 @@ public sealed class TransactionalUpdateEngine
     private static void WaitService(string name, string desired, TimeSpan timeout)
     {
         var deadline = DateTimeOffset.UtcNow + timeout;
-        var expected = desired == "RUNNING" ? "STATE              : 4" : "STATE              : 1";
         while (DateTimeOffset.UtcNow < deadline)
         {
-            var result = Run("sc.exe", ["query", name]);
-            if (result.Output.Contains(expected, StringComparison.OrdinalIgnoreCase) && result.Output.Contains(desired, StringComparison.OrdinalIgnoreCase)) return;
+            if (OperatingSystem.IsWindows())
+            {
+                var expected = desired == "running" ? "STATE              : 4" : "STATE              : 1";
+                var label = desired == "running" ? "RUNNING" : "STOPPED";
+                var result = Run("sc.exe", ["query", name]);
+                if (result.Output.Contains(expected, StringComparison.OrdinalIgnoreCase) &&
+                    result.Output.Contains(label, StringComparison.OrdinalIgnoreCase)) return;
+            }
+            else
+            {
+                EnsureSystemd();
+                var result = Run("systemctl", ["is-active", "--quiet", name]);
+                if (desired == "running" && result.ExitCode == 0) return;
+                if (desired == "stopped" && result.ExitCode == 3) return;
+            }
             Thread.Sleep(500);
         }
         throw new TimeoutException($"Service {name} did not reach {desired}.");
@@ -372,9 +412,13 @@ public sealed class TransactionalUpdateEngine
         try { File.Delete(path); } catch { }
     }
 
-    private static void EnsureWindows()
+    private static void EnsureSystemd()
     {
-        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Service transactions require Windows.");
+        if (OperatingSystem.IsWindows()) return;
+        if (!OperatingSystem.IsLinux())
+            throw new PlatformNotSupportedException("Service transactions require Windows or Linux systemd.");
+        if (!File.Exists("/bin/systemctl") && !File.Exists("/usr/bin/systemctl"))
+            throw new PlatformNotSupportedException("Linux service transactions require systemd/systemctl.");
     }
 }
 
