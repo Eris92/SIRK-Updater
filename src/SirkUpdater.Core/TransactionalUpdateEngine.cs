@@ -234,23 +234,57 @@ public sealed class TransactionalUpdateEngine
             var attemptTimeout = remaining < TimeSpan.FromSeconds(5)
                 ? remaining
                 : TimeSpan.FromSeconds(5);
-            using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            attempt.CancelAfter(attemptTimeout);
-            try
+
+            if (OperatingSystem.IsLinux() && IsLoopbackHost(healthUri.Host))
             {
-                using var response = await _http.GetAsync(healthUri, attempt.Token);
-                if (response.StatusCode is >= HttpStatusCode.OK and < HttpStatusCode.BadRequest) return;
-                last = new HttpRequestException($"Health endpoint returned HTTP {(int)response.StatusCode}.");
+                try
+                {
+                    var result = Run("curl", [
+                        "--fail",
+                        "--silent",
+                        "--show-error",
+                        "--max-time",
+                        "5",
+                        "--output",
+                        "/dev/null",
+                        "--write-out",
+                        "%{http_code}",
+                        healthUri.AbsoluteUri
+                    ]);
+                    if (result.ExitCode == 0 &&
+                        int.TryParse(result.Output.Trim(), out var status) &&
+                        status is >= 200 and < 400)
+                    {
+                        return;
+                    }
+                    last = new HttpRequestException(
+                        $"Linux curl health probe failed with exit code {result.ExitCode}: {result.Output}");
+                }
+                catch (Exception error)
+                {
+                    last = error;
+                }
             }
-            catch (OperationCanceledException error) when (!cancellationToken.IsCancellationRequested)
+            else
             {
-                last = new TimeoutException(
-                    $"Health probe exceeded {attemptTimeout.TotalSeconds:0.#} seconds.",
-                    error);
-            }
-            catch (Exception error) when (error is not OperationCanceledException)
-            {
-                last = error;
+                using var attempt = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                attempt.CancelAfter(attemptTimeout);
+                try
+                {
+                    using var response = await _http.GetAsync(healthUri, attempt.Token);
+                    if (response.StatusCode is >= HttpStatusCode.OK and < HttpStatusCode.BadRequest) return;
+                    last = new HttpRequestException($"Health endpoint returned HTTP {(int)response.StatusCode}.");
+                }
+                catch (OperationCanceledException error) when (!cancellationToken.IsCancellationRequested)
+                {
+                    last = new TimeoutException(
+                        $"Health probe exceeded {attemptTimeout.TotalSeconds:0.#} seconds.",
+                        error);
+                }
+                catch (Exception error) when (error is not OperationCanceledException)
+                {
+                    last = error;
+                }
             }
 
             var delay = deadline - DateTimeOffset.UtcNow;
