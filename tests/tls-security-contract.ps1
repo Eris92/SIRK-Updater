@@ -13,7 +13,7 @@ foreach ($forbidden in @(
 }
 
 foreach ($required in @(
-    'handler ??= new HttpClientHandler()',
+    'handler ??= new HttpClientHandler { UseProxy = false }',
     'ValidateHealthUri(manifest.HealthUrl)',
     'Application health URL must use HTTPS unless it targets localhost or a loopback address',
     'IPAddress.IsLoopback'
