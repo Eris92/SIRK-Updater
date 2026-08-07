@@ -119,7 +119,7 @@ function Install-ServiceFromRoot {
 
     New-Service `
         -Name $ServiceName `
-        -BinaryPathName ('\"{0}\"' -f $serviceExe) `
+        -BinaryPathName ('"{0}"' -f $serviceExe) `
         -DisplayName 'SIRK Updater' `
         -Description 'Transactional update service for SIRK Portal and SIRK Agent.' `
         -StartupType Automatic | Out-Null
