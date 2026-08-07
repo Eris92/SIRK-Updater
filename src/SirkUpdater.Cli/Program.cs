@@ -38,7 +38,8 @@ static async Task<int> RunAsync(string[] args)
                 ApplicationId = args[1],
                 PackagePath = Path.GetFullPath(args[2]),
                 ExpectedSha256 = args[3],
-                TargetVersion = args.Length == 5 ? args[4] : null
+                TargetVersion = args.Length == 5 ? args[4] : null,
+                HealthTimeout = ResolveHealthTimeout()
             });
             Console.WriteLine(JsonSerializer.Serialize(state, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true }));
             return 0;
@@ -61,4 +62,14 @@ static async Task<int> RunAsync(string[] args)
         Console.Error.WriteLine(error.Message);
         return 1;
     }
+}
+
+static TimeSpan ResolveHealthTimeout()
+{
+    const int defaultSeconds = 120;
+    var raw = Environment.GetEnvironmentVariable("SIRK_UPDATER_HEALTH_TIMEOUT_SECONDS");
+    if (string.IsNullOrWhiteSpace(raw)) return TimeSpan.FromSeconds(defaultSeconds);
+    if (!int.TryParse(raw, out var seconds) || seconds is < 5 or > 600)
+        throw new InvalidDataException("SIRK_UPDATER_HEALTH_TIMEOUT_SECONDS must be between 5 and 600 seconds.");
+    return TimeSpan.FromSeconds(seconds);
 }
