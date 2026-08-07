@@ -17,7 +17,9 @@ $text = Get-Content -LiteralPath $scriptPath -Raw
 $required = @(
     'releases/latest',
     '.sha256',
-    'Get-FileHash',
+    'function Get-Sha256Hex',
+    '[Security.Cryptography.SHA256]::Create()',
+    '.ComputeHash(',
     'SHA-256 mismatch',
     'release-manifest.json',
     'framework-dependent',
@@ -36,9 +38,14 @@ foreach ($needle in $required) {
     }
 }
 
-foreach ($needle in @(('AllowSource' + 'Fallback'), ('dotnet publish'), ('install' + '.ps1'))) {
+foreach ($needle in @(
+    'Get-FileHash',
+    ('AllowSource' + 'Fallback'),
+    ('dotnet publish'),
+    ('install' + '.ps1')
+)) {
     if ($text.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-        throw "Legacy source installation behavior is forbidden: $needle"
+        throw "Release installer v2 contains forbidden bootstrap dependency or legacy behavior: $needle"
     }
 }
 
