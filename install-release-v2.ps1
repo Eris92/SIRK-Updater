@@ -30,6 +30,25 @@ function Write-Log {
     Write-Host "[$Level] $Message" -ForegroundColor $Color
 }
 
+function Get-Sha256Hex {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [Security.Cryptography.SHA256]::Create()
+        try {
+            $hashBytes = $sha256.ComputeHash($stream)
+            return (-join @($hashBytes | ForEach-Object { $_.ToString('x2') }))
+        }
+        finally {
+            $sha256.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
 function Get-GitHubApiHeaders {
     $headers = @{
         'User-Agent' = 'SIRK-Updater-Installer-v2'
@@ -100,7 +119,7 @@ function Install-ServiceFromRoot {
 
     New-Service `
         -Name $ServiceName `
-        -BinaryPathName ('"{0}"' -f $serviceExe) `
+        -BinaryPathName ('\"{0}\"' -f $serviceExe) `
         -DisplayName 'SIRK Updater' `
         -Description 'Transactional update service for SIRK Portal and SIRK Agent.' `
         -StartupType Automatic | Out-Null
@@ -161,7 +180,7 @@ try {
     Invoke-WebRequest -UseBasicParsing -Uri $hashAsset.browser_download_url -OutFile $hashPath
 
     $expectedHash = ((Get-Content -LiteralPath $hashPath -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
-    $actualHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $actualHash = Get-Sha256Hex -Path $zipPath
     if ([string]::IsNullOrWhiteSpace($expectedHash) -or $actualHash -ne $expectedHash) {
         throw "SHA-256 mismatch. Expected=$expectedHash Actual=$actualHash"
     }
