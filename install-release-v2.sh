@@ -28,7 +28,8 @@ log "Resolving latest GitHub Release metadata."
 release_json="$tmp/release.json"
 curl --fail --silent --show-error --location \
   --retry 4 --retry-delay 2 --retry-all-errors \
-  "https://api.github.com/repos/${REPO}/releases/latest" -o "$release_json"
+  -H 'Cache-Control: no-cache' \
+  "https://api.github.com/repos/${REPO}/releases/latest?nocache=$(date +%s%N)" -o "$release_json"
 
 readarray -t resolved < <(python3 - "$release_json" <<'PY'
 import json, sys
