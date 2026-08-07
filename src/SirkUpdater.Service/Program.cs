@@ -5,6 +5,7 @@ using SirkUpdater.Core;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddWindowsService(options => options.ServiceName = "SIRK Updater");
+builder.Services.AddSystemd();
 builder.Services.AddSingleton<ApplicationRegistry>();
 builder.Services.AddHostedService<UpdaterWorker>();
 
