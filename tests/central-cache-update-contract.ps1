@@ -6,8 +6,11 @@ $text = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8
 if (-not $text.Contains('CentralCacheSource = "sirk-central-cache"')) {
     throw 'SIRK Updater must recognize the explicit Central cache source.'
 }
-if (-not $text.Contains('UpdateSource == CentralCacheSource')) {
-    throw 'SIRK Updater manifest validation must allow only the explicit Central cache marker or HTTPS bootstrap sources.'
+if (-not $text.Contains('string.Equals(UpdateSource, CentralCacheSource, StringComparison.Ordinal)')) {
+    throw 'SIRK Updater manifest validation must explicitly recognize only the canonical Central cache marker.'
+}
+if (-not $text.Contains('source.Scheme != Uri.UriSchemeHttps')) {
+    throw 'SIRK Updater manifest validation must reject non-HTTPS external bootstrap sources.'
 }
 
 $runtimeSources = Get-ChildItem -LiteralPath (Join-Path $root 'src') -Recurse -File -Include '*.cs' |
