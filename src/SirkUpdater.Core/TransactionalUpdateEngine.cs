@@ -90,8 +90,7 @@ public sealed class TransactionalUpdateEngine
 
             state = Set(UpdatePhase.Installing, 50, "Installing verified package.");
             installationTouched = true;
-            MirrorDirectory(payloadRoot, manifest.InstallRoot);
-            RestorePreservedFiles(backupRoot, manifest.InstallRoot, manifest.PreserveFiles);
+            MirrorDirectory(payloadRoot, manifest.InstallRoot, manifest.PreserveFiles);
 
             state = Set(UpdatePhase.Starting, 75, "Starting application service.");
             ConfigureAutomatic(manifest.ServiceName);
@@ -123,7 +122,7 @@ public sealed class TransactionalUpdateEngine
                     applicationStopped = true;
                     if (!backupReady || !Directory.Exists(backupRoot))
                         throw new DirectoryNotFoundException("Rollback backup is unavailable.");
-                    MirrorDirectory(backupRoot, manifest.InstallRoot);
+                    MirrorDirectory(backupRoot, manifest.InstallRoot, manifest.PreserveFiles);
                 }
 
                 if (applicationStopped)
@@ -442,40 +441,22 @@ public sealed class TransactionalUpdateEngine
     {
         foreach (var relative in preserveFiles)
         {
-            var path = Path.Combine(payloadRoot, RelativePlatformPath(relative));
+            var path = Path.Combine(payloadRoot, relative);
             if (File.Exists(path) || Directory.Exists(path))
                 throw new InvalidDataException(
                     $"Update payload must not contain preserved install file: {relative}");
         }
     }
 
-    private static void RestorePreservedFiles(
-        string backupRoot,
-        string installRoot,
+    private static void MirrorDirectory(
+        string source,
+        string destination,
         IReadOnlyList<string> preserveFiles)
     {
-        foreach (var relative in preserveFiles)
+        var preserve = new HashSet<string>(preserveFiles, StringComparer.OrdinalIgnoreCase)
         {
-            var platformPath = RelativePlatformPath(relative);
-            var source = Path.Combine(backupRoot, platformPath);
-            if (Directory.Exists(source))
-                throw new InvalidDataException(
-                    $"Configured preserved install path is not a file: {relative}");
-            if (!File.Exists(source)) continue;
-
-            var target = Path.Combine(installRoot, platformPath);
-            if (Directory.Exists(target)) Directory.Delete(target, recursive: true);
-            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.Copy(source, target, overwrite: true);
-        }
-    }
-
-    private static string RelativePlatformPath(string relative) =>
-        relative.Replace('/', Path.DirectorySeparatorChar);
-
-    private static void MirrorDirectory(string source, string destination)
-    {
-        var preserve = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Service" };
+            "Service"
+        };
         Directory.CreateDirectory(destination);
         foreach (var entry in Directory.EnumerateFileSystemEntries(destination))
         {

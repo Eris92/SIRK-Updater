@@ -71,14 +71,15 @@ public sealed record ApplicationManifest
         foreach (var value in PreserveFiles)
         {
             var normalized = (value ?? string.Empty).Replace('\\', '/');
-            if (normalized.Length is <= 0 or > 512 ||
+            if (normalized.Length is <= 0 or > 255 ||
                 normalized.StartsWith('/') ||
                 normalized.EndsWith('/') ||
+                normalized.Contains('/', StringComparison.Ordinal) ||
                 normalized.Contains(':', StringComparison.Ordinal) ||
                 Path.IsPathRooted(normalized) ||
-                normalized.Split('/').Any(segment => segment is "" or "." or "..") ||
+                normalized is "." or ".." ||
                 !preserved.Add(normalized))
-                throw new InvalidDataException("preserveFiles contains an invalid relative file path.");
+                throw new InvalidDataException("preserveFiles contains an invalid top-level relative file path.");
         }
 
         if (!SignatureRequired) return;

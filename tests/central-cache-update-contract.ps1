@@ -16,13 +16,14 @@ if (-not $text.Contains('source.Scheme != Uri.UriSchemeHttps')) {
     throw 'SIRK Updater manifest validation must reject non-HTTPS external bootstrap sources.'
 }
 if (-not $text.Contains('[JsonPropertyName("preserveFiles")]') -or
-    -not $text.Contains('preserveFiles contains an invalid relative file path.')) {
-    throw 'SIRK Updater manifest must validate explicitly declared mutable install files.'
+    -not $text.Contains('preserveFiles contains an invalid top-level relative file path.')) {
+    throw 'SIRK Updater manifest must validate explicitly declared top-level mutable install files.'
 }
 if (-not $engine.Contains('ValidatePreservedFiles(payloadRoot, manifest.PreserveFiles);') -or
-    -not $engine.Contains('RestorePreservedFiles(backupRoot, manifest.InstallRoot, manifest.PreserveFiles);') -or
+    -not $engine.Contains('MirrorDirectory(payloadRoot, manifest.InstallRoot, manifest.PreserveFiles);') -or
+    -not $engine.Contains('MirrorDirectory(backupRoot, manifest.InstallRoot, manifest.PreserveFiles);') -or
     -not $engine.Contains('Update payload must not contain preserved install file:')) {
-    throw 'SIRK Updater must restore mutable files from backup and reject payload collisions.'
+    throw 'SIRK Updater must leave mutable install files untouched and reject signed payload collisions.'
 }
 
 $runtimeSources = Get-ChildItem -LiteralPath (Join-Path $root 'src') -Recurse -File -Include '*.cs' |
