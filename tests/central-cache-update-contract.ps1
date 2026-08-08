@@ -25,6 +25,11 @@ if (-not $engine.Contains('ValidatePreservedFiles(payloadRoot, manifest.Preserve
     -not $engine.Contains('Update payload must not contain preserved install file:')) {
     throw 'SIRK Updater must leave mutable install files untouched and reject signed payload collisions.'
 }
+if (-not $engine.Contains('DeleteManagedEntry(entry);') -or
+    -not $engine.Contains('FileAttributes.ReadOnly') -or
+    -not $engine.Contains('CopyManagedFile(file, target);')) {
+    throw 'SIRK Updater must normalize read-only managed payload files before replacement and after copy.'
+}
 
 $runtimeSources = Get-ChildItem -LiteralPath (Join-Path $root 'src') -Recurse -File -Include '*.cs' |
     ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }

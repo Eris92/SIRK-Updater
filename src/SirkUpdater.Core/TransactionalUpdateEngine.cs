@@ -433,7 +433,7 @@ public sealed class TransactionalUpdateEngine
         {
             var target = Path.Combine(destination, Path.GetRelativePath(source, file));
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.Copy(file, target, overwrite: true);
+            CopyManagedFile(file, target);
         }
     }
 
@@ -461,14 +461,49 @@ public sealed class TransactionalUpdateEngine
         foreach (var entry in Directory.EnumerateFileSystemEntries(destination))
         {
             if (preserve.Contains(Path.GetFileName(entry))) continue;
-            if (Directory.Exists(entry)) Directory.Delete(entry, recursive: true); else File.Delete(entry);
+            DeleteManagedEntry(entry);
         }
         foreach (var entry in Directory.EnumerateFileSystemEntries(source))
         {
             if (preserve.Contains(Path.GetFileName(entry))) continue;
             var target = Path.Combine(destination, Path.GetFileName(entry));
-            if (Directory.Exists(entry)) CopyDirectory(entry, target); else File.Copy(entry, target, overwrite: true);
+            if (Directory.Exists(entry)) CopyDirectory(entry, target); else CopyManagedFile(entry, target);
         }
+    }
+
+    private static void DeleteManagedEntry(string path)
+    {
+        var attributes = File.GetAttributes(path);
+        var isDirectory = (attributes & FileAttributes.Directory) != 0;
+        var isReparsePoint = (attributes & FileAttributes.ReparsePoint) != 0;
+        ClearReadOnly(path, attributes);
+
+        if (!isDirectory)
+        {
+            File.Delete(path);
+            return;
+        }
+        if (isReparsePoint)
+        {
+            Directory.Delete(path);
+            return;
+        }
+
+        foreach (var child in Directory.EnumerateFileSystemEntries(path))
+            DeleteManagedEntry(child);
+        Directory.Delete(path);
+    }
+
+    private static void CopyManagedFile(string source, string destination)
+    {
+        File.Copy(source, destination, overwrite: true);
+        ClearReadOnly(destination, File.GetAttributes(destination));
+    }
+
+    private static void ClearReadOnly(string path, FileAttributes attributes)
+    {
+        if (!OperatingSystem.IsWindows() || (attributes & FileAttributes.ReadOnly) == 0) return;
+        File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
     }
 
     private static void Persist(string statePath, UpdateState state) => AtomicWrite(statePath, JsonSerializer.Serialize(state, JsonOptions));
