@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
-    branches: [main, develop]
+    branches: [main]
 
 permissions:
   contents: read
@@ -37,6 +37,7 @@ jobs:
             'tests/install-release-contract.ps1',
             'tests/delegated-signature-contract.ps1',
             'tests/tls-security-contract.ps1',
+            'tests/central-cache-update-contract.ps1',
             'test/release-package-contract.ps1'
           )) {
             if (-not (Test-Path -LiteralPath $file)) { throw "Missing contract file: $file" }
@@ -53,6 +54,8 @@ jobs:
           }
           if (Test-Path install.ps1) { throw 'Legacy source installer is forbidden.' }
           if (Test-Path install-release.ps1) { throw 'Legacy release installer is forbidden.' }
+          if (Test-Path '.github/workflows/release.yml') { throw 'Legacy .NET 8 updater release workflow is forbidden.' }
+
       - name: Release installer contract
         shell: pwsh
         run: ./tests/install-release-contract.ps1
@@ -62,6 +65,9 @@ jobs:
       - name: Strict TLS and health URI contract
         shell: pwsh
         run: ./tests/tls-security-contract.ps1
+      - name: Central-only runtime update contract
+        shell: pwsh
+        run: ./tests/central-cache-update-contract.ps1
 
   release-package-contract:
     runs-on: windows-latest
@@ -99,7 +105,7 @@ jobs:
           @{
             schemaVersion = 1
             applicationId = 'sirk-updater'
-            version = '0.0.0-ci'
+            version = '0.1.1.0-ci'
             architecture = 'win-x64'
             deploymentMode = 'framework-dependent'
             targetFramework = 'net10.0'
