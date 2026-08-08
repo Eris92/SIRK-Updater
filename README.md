@@ -2,17 +2,27 @@
 
 Wspólny transactional updater dla komponentów SIRK Platform.
 
-## Cel
+## Rola
 
-Jedna usługa Windows obsługuje aktualizacje wielu aplikacji:
+SIRK Updater jest wykonawcą transakcji aktualizacji. Nie jest runtime brokerem GitHub i nie przechowuje GitHub credentials.
 
-- SIRK Portal
-- SIRK Agent
-- w przyszłości SIRK Central
+Dla bieżącego kontraktu platformy:
 
-Instalatory aplikacji nie zawierają własnego silnika aktualizacji. Sprawdzają, czy `SIRK Updater` jest zainstalowany i zgodny, instalują go tylko wtedy, gdy go brakuje albo jest starszy niż wymagana wersja, a następnie rejestrują manifest aplikacji.
+- SIRK Central jest jedynym runtime brokerem aktualizacji produktów;
+- Agent i Portal otrzymują już zweryfikowany pakiet z Central cache;
+- manifest aplikacji używa `updateSource: "sirk-central-cache"`;
+- Updater weryfikuje przekazany SHA-256, bezpieczeństwo ZIP i deleguje weryfikację podpisanego payloadu do verifiera komponentu;
+- następnie wykonuje backup, maintenance, stop/start usług, instalację, health check oraz rollback przy błędzie.
 
-## Docelowe ścieżki
+Updater nie jest osobnym produktem dystrybuowanym przez Central product cache. Jest współdzielonym executorem instalowanym jako zależność bootstrap/runtime.
+
+## Runtime
+
+Aktualna linia `main` jest .NET 10-only i używa framework-dependent binaries.
+
+Kanoniczna linia wersji przed pierwszym świadomie zatwierdzonym `1.0.0` to `0.1.1.X`.
+
+## Docelowe ścieżki Windows
 
 ```text
 C:\Program Files\SIRK\Updater
@@ -20,24 +30,26 @@ C:\ProgramData\SIRK\Updater
 C:\ProgramData\SIRK\Updater\applications
 ```
 
-## Usługa
+Usługa Windows:
 
 ```text
 ServiceName: SirkUpdater
 DisplayName: SIRK Updater
 ```
 
+Na Linux dane runtime są przechowywane pod `/var/lib/sirk-updater`, a instalatory komponentów rejestrują manifesty aplikacji zgodnie z lokalnym lifecycle.
+
 ## Transactional update
 
 ```text
-download
-verify signature and SHA256
+verify package SHA-256 and ZIP safety
+extract staging payload
+verify signed payload through component verifier
 backup
 maintenance.lock
 stop watchdog
 stop application service
 replace files
-run migrations
 start application service
 health check
 commit or rollback
@@ -46,6 +58,4 @@ remove maintenance.lock
 cleanup
 ```
 
-## Stan projektu
-
-Wersja początkowa rozwijana jest jako .NET 8 Windows Service z biblioteką Core i CLI.
+Runtime update nie wykonuje direct-GitHub discovery ani downloadu. Publiczny GitHub może być używany wyłącznie przez bootstrap installer zgodnie z kontraktem projektu.
