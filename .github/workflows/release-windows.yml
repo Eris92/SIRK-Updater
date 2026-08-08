@@ -2,7 +2,7 @@ name: SIRK Updater Release
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'src/**'
       - 'test/**'
@@ -21,7 +21,7 @@ jobs:
   build-release:
     runs-on: windows-latest
     env:
-      VERSION: 0.1.0-dev.${{ github.run_number }}
+      VERSION: 0.1.1.${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
 
@@ -32,8 +32,12 @@ jobs:
       - name: Enforce .NET 10 and release-only contract
         shell: pwsh
         run: |
+          if ($env:VERSION -notmatch '^0\.1\.1\.\d+$') {
+            throw "Updater release version must use canonical pre-1.0 0.1.1.X: $env:VERSION"
+          }
           if (Test-Path install.ps1) { throw 'Legacy source installer is forbidden.' }
           if (Test-Path install-release.ps1) { throw 'Legacy fallback installer is forbidden.' }
+          if (Test-Path '.github/workflows/release.yml') { throw 'Legacy .NET 8 updater release workflow is forbidden.' }
           if (-not (Test-Path install-release-v2.ps1)) { throw 'Canonical Windows release installer is missing.' }
           if (-not (Test-Path install-release-v2.sh)) { throw 'Canonical Linux release installer is missing.' }
           $files = Get-ChildItem src -Recurse -File -Include *.csproj,*.props,*.targets,*.ps1 -ErrorAction SilentlyContinue
@@ -64,6 +68,8 @@ jobs:
           dotnet test SIRK-Updater.sln -c Release --no-build
           ./tests/install-release-contract.ps1
           ./tests/delegated-signature-contract.ps1
+          ./tests/tls-security-contract.ps1
+          ./tests/central-cache-update-contract.ps1
 
       - name: Publish Windows service and CLI
         shell: pwsh
@@ -71,10 +77,16 @@ jobs:
           dotnet publish src/SirkUpdater.Service/SirkUpdater.Service.csproj `
             -c Release -r win-x64 --self-contained false `
             -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false `
+            "-p:Version=$env:VERSION" `
+            "-p:FileVersion=$env:VERSION" `
+            "-p:InformationalVersion=$env:VERSION+${{ github.sha }}" `
             -o publish/win/service
           dotnet publish src/SirkUpdater.Cli/SirkUpdater.Cli.csproj `
             -c Release -r win-x64 --self-contained false `
             -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false `
+            "-p:Version=$env:VERSION" `
+            "-p:FileVersion=$env:VERSION" `
+            "-p:InformationalVersion=$env:VERSION+${{ github.sha }}" `
             -o publish/win/cli
 
       - name: Publish Linux service and CLI
@@ -83,10 +95,16 @@ jobs:
           dotnet publish src/SirkUpdater.Service/SirkUpdater.Service.csproj `
             -c Release -r linux-x64 --self-contained false `
             -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false `
+            "-p:Version=$env:VERSION" `
+            "-p:FileVersion=$env:VERSION" `
+            "-p:InformationalVersion=$env:VERSION+${{ github.sha }}" `
             -o publish/linux/service
           dotnet publish src/SirkUpdater.Cli/SirkUpdater.Cli.csproj `
             -c Release -r linux-x64 --self-contained false `
             -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false `
+            "-p:Version=$env:VERSION" `
+            "-p:FileVersion=$env:VERSION" `
+            "-p:InformationalVersion=$env:VERSION+${{ github.sha }}" `
             -o publish/linux/cli
 
       - name: Build Windows release package
