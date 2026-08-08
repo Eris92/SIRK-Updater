@@ -41,6 +41,11 @@ if (-not $engine.Contains('Run("sc.exe", ["queryex", name])') -or
     -not $engine.Contains('Process.GetProcessById(processId)')) {
     throw 'SIRK Updater must wait for the captured Windows service process to exit before replacing binaries.'
 }
+if (-not $engine.Contains('WindowsManagedDeleteRetryTimeout = TimeSpan.FromSeconds(10)') -or
+    -not $engine.Contains('error is IOException or UnauthorizedAccessException') -or
+    -not $engine.Contains('Thread.Sleep(100);')) {
+    throw 'SIRK Updater must bound retries for transient Windows managed-file delete contention.'
+}
 
 $runtimeSources = Get-ChildItem -LiteralPath (Join-Path $root 'src') -Recurse -File -Include '*.cs' |
     ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }
