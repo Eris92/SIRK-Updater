@@ -528,8 +528,29 @@ public sealed class TransactionalUpdateEngine
 
     private static void CopyManagedFile(string source, string destination)
     {
-        File.Copy(source, destination, overwrite: true);
-        ClearReadOnly(destination, File.GetAttributes(destination));
+        if (!OperatingSystem.IsWindows())
+        {
+            File.Copy(source, destination, overwrite: true);
+            return;
+        }
+
+        if (File.Exists(destination)) DeleteManagedEntry(destination);
+        using var input = new FileStream(
+            source,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            128 * 1024,
+            FileOptions.SequentialScan);
+        using var output = new FileStream(
+            destination,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            128 * 1024,
+            FileOptions.WriteThrough);
+        input.CopyTo(output);
+        output.Flush(flushToDisk: true);
     }
 
     private static void ClearReadOnly(string path, FileAttributes attributes)
