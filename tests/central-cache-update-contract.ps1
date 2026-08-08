@@ -28,7 +28,13 @@ if (-not $engine.Contains('ValidatePreservedFiles(payloadRoot, manifest.Preserve
 if (-not $engine.Contains('DeleteManagedEntry(entry);') -or
     -not $engine.Contains('FileAttributes.ReadOnly') -or
     -not $engine.Contains('CopyManagedFile(file, target);')) {
-    throw 'SIRK Updater must normalize read-only managed payload files before replacement and after copy.'
+    throw 'SIRK Updater must normalize read-only managed payload files before replacement.'
+}
+if (-not $engine.Contains('if (!OperatingSystem.IsWindows())') -or
+    -not $engine.Contains('FileMode.CreateNew') -or
+    -not $engine.Contains('FileOptions.WriteThrough') -or
+    -not $engine.Contains('input.CopyTo(output);')) {
+    throw 'SIRK Updater Windows copies must create target files in place so they inherit the destination ACL instead of copying staging security descriptors.'
 }
 if (-not $engine.Contains('Run("sc.exe", ["queryex", name])') -or
     -not $engine.Contains('WaitForWindowsProcessExit(processId, TimeSpan.FromMinutes(2));') -or
