@@ -1,8 +1,11 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $manifestPath = Join-Path $root 'src/SirkUpdater.Core/ApplicationManifest.cs'
+$enginePath = Join-Path $root 'src/SirkUpdater.Core/TransactionalUpdateEngine.cs'
 if (-not (Test-Path -LiteralPath $manifestPath)) { throw 'ApplicationManifest.cs is missing.' }
+if (-not (Test-Path -LiteralPath $enginePath)) { throw 'TransactionalUpdateEngine.cs is missing.' }
 $text = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8
+$engine = Get-Content -LiteralPath $enginePath -Raw -Encoding UTF8
 if (-not $text.Contains('CentralCacheSource = "sirk-central-cache"')) {
     throw 'SIRK Updater must recognize the explicit Central cache source.'
 }
@@ -11,6 +14,15 @@ if (-not $text.Contains('string.Equals(UpdateSource, CentralCacheSource, StringC
 }
 if (-not $text.Contains('source.Scheme != Uri.UriSchemeHttps')) {
     throw 'SIRK Updater manifest validation must reject non-HTTPS external bootstrap sources.'
+}
+if (-not $text.Contains('[JsonPropertyName("preserveFiles")]') -or
+    -not $text.Contains('preserveFiles contains an invalid relative file path.')) {
+    throw 'SIRK Updater manifest must validate explicitly declared mutable install files.'
+}
+if (-not $engine.Contains('ValidatePreservedFiles(payloadRoot, manifest.PreserveFiles);') -or
+    -not $engine.Contains('RestorePreservedFiles(backupRoot, manifest.InstallRoot, manifest.PreserveFiles);') -or
+    -not $engine.Contains('Update payload must not contain preserved install file:')) {
+    throw 'SIRK Updater must restore mutable files from backup and reject payload collisions.'
 }
 
 $runtimeSources = Get-ChildItem -LiteralPath (Join-Path $root 'src') -Recurse -File -Include '*.cs' |
