@@ -12,6 +12,7 @@ public sealed class TransactionalUpdateEngine
     {
         WriteIndented = true
     };
+    private static readonly TimeSpan WindowsManagedDeleteRetryTimeout = TimeSpan.FromSeconds(10);
 
     private readonly ApplicationRegistry _registry;
     private readonly string _root;
@@ -512,18 +513,47 @@ public sealed class TransactionalUpdateEngine
 
         if (!isDirectory)
         {
-            File.Delete(path);
+            DeleteManagedPathWithRetry(path, isDirectory: false);
             return;
         }
         if (isReparsePoint)
         {
-            Directory.Delete(path);
+            DeleteManagedPathWithRetry(path, isDirectory: true);
             return;
         }
 
         foreach (var child in Directory.EnumerateFileSystemEntries(path))
             DeleteManagedEntry(child);
-        Directory.Delete(path);
+        DeleteManagedPathWithRetry(path, isDirectory: true);
+    }
+
+    private static void DeleteManagedPathWithRetry(string path, bool isDirectory)
+    {
+        var started = Stopwatch.GetTimestamp();
+        while (true)
+        {
+            try
+            {
+                if (isDirectory)
+                {
+                    if (!Directory.Exists(path)) return;
+                    Directory.Delete(path);
+                }
+                else
+                {
+                    if (!File.Exists(path)) return;
+                    File.Delete(path);
+                }
+                return;
+            }
+            catch (Exception error) when (
+                OperatingSystem.IsWindows() &&
+                error is IOException or UnauthorizedAccessException &&
+                Stopwatch.GetElapsedTime(started) < WindowsManagedDeleteRetryTimeout)
+            {
+                Thread.Sleep(100);
+            }
+        }
     }
 
     private static void CopyManagedFile(string source, string destination)
