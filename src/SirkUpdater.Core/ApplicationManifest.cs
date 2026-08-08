@@ -48,6 +48,9 @@ public sealed record ApplicationManifest
     [JsonPropertyName("signatureVerifierArguments")]
     public IReadOnlyList<string> SignatureVerifierArguments { get; init; } = [];
 
+    [JsonPropertyName("preserveFiles")]
+    public IReadOnlyList<string> PreserveFiles { get; init; } = [];
+
     public void Validate()
     {
         if (!System.Text.RegularExpressions.Regex.IsMatch(ApplicationId, "^[a-z0-9][a-z0-9._-]{1,63}$"))
@@ -61,6 +64,22 @@ public sealed record ApplicationManifest
             throw new InvalidDataException("updateSource must be sirk-central-cache or an absolute HTTPS URL.");
         if (HealthUrl is not null && (!Uri.TryCreate(HealthUrl, UriKind.Absolute, out var health) || health.Scheme is not ("http" or "https")))
             throw new InvalidDataException("healthUrl must be HTTP or HTTPS.");
+
+        if (PreserveFiles.Count > 64)
+            throw new InvalidDataException("preserveFiles contains too many entries.");
+        var preserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var value in PreserveFiles)
+        {
+            var normalized = (value ?? string.Empty).Replace('\\', '/');
+            if (normalized.Length is <= 0 or > 512 ||
+                normalized.StartsWith('/') ||
+                normalized.EndsWith('/') ||
+                normalized.Contains(':', StringComparison.Ordinal) ||
+                Path.IsPathRooted(normalized) ||
+                normalized.Split('/').Any(segment => segment is "" or "." or "..") ||
+                !preserved.Add(normalized))
+                throw new InvalidDataException("preserveFiles contains an invalid relative file path.");
+        }
 
         if (!SignatureRequired) return;
         if (string.IsNullOrWhiteSpace(SignatureVerifierPath) || !Path.IsPathFullyQualified(SignatureVerifierPath))
