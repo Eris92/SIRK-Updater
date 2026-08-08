@@ -30,6 +30,11 @@ if (-not $engine.Contains('DeleteManagedEntry(entry);') -or
     -not $engine.Contains('CopyManagedFile(file, target);')) {
     throw 'SIRK Updater must normalize read-only managed payload files before replacement and after copy.'
 }
+if (-not $engine.Contains('Run("sc.exe", ["queryex", name])') -or
+    -not $engine.Contains('WaitForWindowsProcessExit(processId, TimeSpan.FromMinutes(2));') -or
+    -not $engine.Contains('Process.GetProcessById(processId)')) {
+    throw 'SIRK Updater must wait for the captured Windows service process to exit before replacing binaries.'
+}
 
 $runtimeSources = Get-ChildItem -LiteralPath (Join-Path $root 'src') -Recurse -File -Include '*.cs' |
     ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 }

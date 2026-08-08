@@ -322,11 +322,13 @@ public sealed class TransactionalUpdateEngine
     {
         if (OperatingSystem.IsWindows())
         {
+            var processId = GetWindowsServiceProcessId(name);
             var result = Run("sc.exe", ["stop", name]);
             var output = result.Output;
             if (result.ExitCode != 0 && !(allowNotRunning && (output.Contains("1062") || output.Contains("SERVICE_NOT_ACTIVE", StringComparison.OrdinalIgnoreCase))))
                 throw new InvalidOperationException($"Unable to stop service {name}: {output}");
             if (result.ExitCode == 0) WaitService(name, "stopped", TimeSpan.FromMinutes(2));
+            WaitForWindowsProcessExit(processId, TimeSpan.FromMinutes(2));
             return;
         }
 
@@ -339,6 +341,36 @@ public sealed class TransactionalUpdateEngine
                 throw new InvalidOperationException($"Unable to stop service {name}: {linux.Output}");
         }
         WaitService(name, "stopped", TimeSpan.FromMinutes(2));
+    }
+
+    private static int GetWindowsServiceProcessId(string name)
+    {
+        var result = Run("sc.exe", ["queryex", name]);
+        if (result.ExitCode != 0) return 0;
+        var match = System.Text.RegularExpressions.Regex.Match(
+            result.Output,
+            @"\bPID\s*:\s*(\d+)\b",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant |
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return match.Success && int.TryParse(match.Groups[1].Value, out var processId)
+            ? processId
+            : 0;
+    }
+
+    private static void WaitForWindowsProcessExit(int processId, TimeSpan timeout)
+    {
+        if (processId <= 0) return;
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            if (!process.WaitForExit(checked((int)timeout.TotalMilliseconds)))
+                throw new TimeoutException(
+                    $"Service process PID {processId} did not exit after the service stopped.");
+        }
+        catch (ArgumentException)
+        {
+            // The captured service process already exited before the wait began.
+        }
     }
 
     private static void StartService(string name, bool allowAlreadyRunning = false)
